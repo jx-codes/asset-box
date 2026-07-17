@@ -9,6 +9,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "deploy": "vite build && wrangler deploy",
+    "deploy:uat": "CLOUDFLARE_ENV=uat vite build && CLOUDFLARE_ENV=uat wrangler deploy",
+    "deploy:prod": "CLOUDFLARE_ENV=prod vite build && CLOUDFLARE_ENV=prod wrangler deploy",
     "cf-typegen": "wrangler types",
     "db:migrate:local": "wrangler d1 migrations apply ASSET_BOX_DB --local",
     "db:migrate:uat": "wrangler d1 migrations apply ASSET_BOX_DB --env uat --remote",
