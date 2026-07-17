@@ -6,7 +6,11 @@ import { deleteCookie, setCookie } from "hono/cookie"
 import {
   ApiErrorSchema,
   AssetIdSchema,
+  AssetLifecycleInputSchema,
+  AssetSchema,
+  AssetTagInputSchema,
   LibrarySchema,
+  LibraryViewSchema,
   LoginInputSchema,
   SessionSchema,
   TagInputSchema,
@@ -14,11 +18,21 @@ import {
   TagSlugSchema,
   UploadResponseSchema,
 } from "@/shared/domain"
+import type { AssetEvent } from "@/shared/events"
+import { deleteAsset } from "./assets/delete-service"
 import { uploadAsset } from "./assets/service"
 import { authorize, checkPasswordAttempt } from "./auth/authorize"
 import { createSessionToken, sessionCookieOptions } from "./auth/session"
 import { AssetBoxCoordinator } from "./coordinator"
-import { createTag, deleteTag, getLibrary, requireAsset, updateTag } from "./data/repository"
+import {
+  createTag,
+  deleteTag,
+  getLibrary,
+  replaceAssetTags,
+  requireAsset,
+  setAssetLifecycle,
+  updateTag,
+} from "./data/repository"
 import type { Env } from "./env"
 import {
   InternalFailureError,
@@ -57,6 +71,21 @@ const commonErrorResponses = {
 function respondError(c: Context<AppContext>, error: Error) {
   const response = toErrorResponse(error)
   return c.json(response.body, response.status, response.headers)
+}
+
+async function notifyClients({ c, event }: { c: Context<AppContext>; event: AssetEvent }) {
+  const coordinator = c.env.COORDINATOR.get(c.env.COORDINATOR.idFromName("events"))
+  const notified = await coordinator
+    .fetch("https://coordinator/broadcast", {
+      method: "POST",
+      body: JSON.stringify(event),
+    })
+    .catch((cause) => new InternalFailureError({ operation: "live update broadcast", cause }))
+  if (notified instanceof Error) {
+    console.warn("Committed change, but live update failed", notified)
+    return
+  }
+  if (!notified.ok) console.warn("Committed change, but live update returned", notified.status)
 }
 
 async function parseJsonInput<T>({
@@ -107,7 +136,11 @@ app.post("/api/logout", (c) => {
 app.get("/api/library", async (c) => {
   const auth = await authorize(c)
   if (auth instanceof Error) return respondError(c, auth)
-  const library = await getLibrary(c.env.ASSET_BOX_DB)
+  const view = LibraryViewSchema.safeParse(c.req.query("view") ?? "active")
+  if (!view.success) {
+    return respondError(c, new InvalidInputError({ reason: "Library view is invalid" }))
+  }
+  const library = await getLibrary({ db: c.env.ASSET_BOX_DB, view: view.data })
   if (library instanceof Error) return respondError(c, library)
   return c.json(library)
 })
@@ -120,6 +153,7 @@ app.post("/api/tags", async (c) => {
 
   const tag = await createTag({ db: c.env.ASSET_BOX_DB, input, now: new Date() })
   if (tag instanceof Error) return respondError(c, tag)
+  await notifyClients({ c, event: { tag: "tags-changed" } })
   return c.json(tag, 201)
 })
 
@@ -133,6 +167,7 @@ app.put("/api/tags/:id", async (c) => {
 
   const tag = await updateTag({ db: c.env.ASSET_BOX_DB, id: id.data, input })
   if (tag instanceof Error) return respondError(c, tag)
+  await notifyClients({ c, event: { tag: "tags-changed" } })
   return c.json(tag)
 })
 
@@ -144,6 +179,7 @@ app.delete("/api/tags/:id", async (c) => {
 
   const result = await deleteTag({ db: c.env.ASSET_BOX_DB, id: id.data })
   if (result instanceof Error) return respondError(c, result)
+  await notifyClients({ c, event: { tag: "tags-changed" } })
   return c.body(null, 204)
 })
 
@@ -182,21 +218,69 @@ app.post("/api/assets", async (c) => {
   if (result instanceof Error) return respondError(c, result)
 
   if (result.status === "created") {
-    const coordinator = c.env.COORDINATOR.get(c.env.COORDINATOR.idFromName("events"))
-    const notified = await coordinator
-      .fetch("https://coordinator/broadcast", {
-        method: "POST",
-        body: JSON.stringify({ tag: "asset-created", asset: result.asset }),
-      })
-      .catch((cause) => new InternalFailureError({ operation: "live update broadcast", cause }))
-    if (notified instanceof Error) console.warn("Asset stored, but live update failed", notified)
-    if (!(notified instanceof Error) && !notified.ok) {
-      console.warn("Asset stored, but live update returned", notified.status)
-    }
+    await notifyClients({ c, event: { tag: "asset-created", asset: result.asset } })
   }
 
   if (result.status === "created") return c.json(result, 201)
   return c.json(result)
+})
+
+app.put("/api/assets/:id/lifecycle", async (c) => {
+  const auth = await authorize(c)
+  if (auth instanceof Error) return respondError(c, auth)
+  const id = AssetIdSchema.safeParse(c.req.param("id"))
+  if (!id.success) {
+    return respondError(c, new InvalidInputError({ reason: "Asset id is invalid" }))
+  }
+  const input = await parseJsonInput({
+    read: () => c.req.json(),
+    schema: AssetLifecycleInputSchema,
+  })
+  if (input instanceof Error) return respondError(c, input)
+
+  const asset = await setAssetLifecycle({
+    db: c.env.ASSET_BOX_DB,
+    id: id.data,
+    input,
+    now: new Date(),
+  })
+  if (asset instanceof Error) return respondError(c, asset)
+  await notifyClients({ c, event: { tag: "asset-updated", asset } })
+  return c.json(asset)
+})
+
+app.put("/api/assets/:id/tags", async (c) => {
+  const auth = await authorize(c)
+  if (auth instanceof Error) return respondError(c, auth)
+  const id = AssetIdSchema.safeParse(c.req.param("id"))
+  if (!id.success) {
+    return respondError(c, new InvalidInputError({ reason: "Asset id is invalid" }))
+  }
+  const input = await parseJsonInput({ read: () => c.req.json(), schema: AssetTagInputSchema })
+  if (input instanceof Error) return respondError(c, input)
+
+  const asset = await replaceAssetTags({
+    db: c.env.ASSET_BOX_DB,
+    id: id.data,
+    tagSlugs: input.tagSlugs,
+  })
+  if (asset instanceof Error) return respondError(c, asset)
+  await notifyClients({ c, event: { tag: "asset-updated", asset } })
+  return c.json(asset)
+})
+
+app.delete("/api/assets/:id", async (c) => {
+  const auth = await authorize(c)
+  if (auth instanceof Error) return respondError(c, auth)
+  const id = AssetIdSchema.safeParse(c.req.param("id"))
+  if (!id.success) {
+    return respondError(c, new InvalidInputError({ reason: "Asset id is invalid" }))
+  }
+
+  const result = await deleteAsset({ env: c.env, id: id.data, now: new Date() })
+  if (result instanceof Error) return respondError(c, result)
+  await notifyClients({ c, event: { tag: "asset-deleted", assetId: id.data } })
+  return c.body(null, 204)
 })
 
 app.get("/assets/:id", async (c) => {
@@ -277,6 +361,7 @@ app.openAPIRegistry.registerPath({
   path: "/api/library",
   tags: ["Library"],
   security: protectedSecurity,
+  request: { query: z.object({ view: LibraryViewSchema.optional() }) },
   responses: { ...commonErrorResponses, 200: jsonContent(LibrarySchema, "Asset library") },
 })
 app.openAPIRegistry.registerPath({
@@ -319,6 +404,36 @@ app.openAPIRegistry.registerPath({
     200: jsonContent(UploadResponseSchema, "Existing duplicate asset"),
     201: jsonContent(UploadResponseSchema, "Created asset"),
   },
+})
+app.openAPIRegistry.registerPath({
+  method: "put",
+  path: "/api/assets/{id}/lifecycle",
+  tags: ["Assets"],
+  security: protectedSecurity,
+  request: {
+    params: z.object({ id: AssetIdSchema }),
+    body: { content: { "application/json": { schema: AssetLifecycleInputSchema } } },
+  },
+  responses: { ...commonErrorResponses, 200: jsonContent(AssetSchema, "Updated asset") },
+})
+app.openAPIRegistry.registerPath({
+  method: "put",
+  path: "/api/assets/{id}/tags",
+  tags: ["Assets"],
+  security: protectedSecurity,
+  request: {
+    params: z.object({ id: AssetIdSchema }),
+    body: { content: { "application/json": { schema: AssetTagInputSchema } } },
+  },
+  responses: { ...commonErrorResponses, 200: jsonContent(AssetSchema, "Retagged asset") },
+})
+app.openAPIRegistry.registerPath({
+  method: "delete",
+  path: "/api/assets/{id}",
+  tags: ["Assets"],
+  security: protectedSecurity,
+  request: { params: z.object({ id: AssetIdSchema }) },
+  responses: { ...commonErrorResponses, 204: { description: "Asset deleted" } },
 })
 
 app.use("/api/openapi.json", async (c, next) => {

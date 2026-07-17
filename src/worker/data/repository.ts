@@ -1,9 +1,11 @@
 import * as errore from "errore"
 import { z } from "zod"
 import {
+  type AssetLifecycleInput,
   AssetSchema,
   type Asset,
   type Library,
+  type LibraryView,
   TagSchema,
   type Tag,
   type TagInput,
@@ -20,9 +22,14 @@ const AssetRowSchema = z.object({
   id: z.string(),
   title: z.string(),
   blurb: z.string(),
+  object_key: z.string(),
   size_bytes: z.number(),
   created_at: z.string(),
+  archived_at: z.string().nullable(),
+  deleted_at: z.string().nullable(),
 })
+
+export type AssetStorageRecord = z.infer<typeof AssetRowSchema>
 
 const TagRowSchema = z.object({
   id: z.string(),
@@ -90,22 +97,36 @@ function toTag(row: z.infer<typeof TagRowSchema>): Tag {
   })
 }
 
-function toAsset({ row, tags }: { row: z.infer<typeof AssetRowSchema>; tags: Tag[] }): Asset {
+function toAsset({ row, tags }: { row: AssetStorageRecord; tags: Tag[] }): Asset {
   return AssetSchema.parse({
     id: row.id,
     title: row.title,
     blurb: row.blurb,
     sizeBytes: row.size_bytes,
     createdAt: row.created_at,
+    lifecycle:
+      row.archived_at === null
+        ? { tag: "active" }
+        : { tag: "archived", archivedAt: row.archived_at },
     tags,
   })
 }
 
-export async function getLibrary(db: D1Database): Promise<DatabaseFailureError | Library> {
+export async function getLibrary({
+  db,
+  view,
+}: {
+  db: D1Database
+  view: LibraryView
+}): Promise<DatabaseFailureError | Library> {
+  const lifecycleClause = view === "active" ? "archived_at IS NULL" : "archived_at IS NOT NULL"
   const [assetRows, tagRows, linkRows] = await Promise.all([
     readRows({
       statement: db.prepare(
-        "SELECT id, title, blurb, size_bytes, created_at FROM assets ORDER BY created_at DESC",
+        `SELECT id, title, blurb, object_key, size_bytes, created_at, archived_at, deleted_at
+         FROM assets
+         WHERE deleted_at IS NULL AND ${lifecycleClause}
+         ORDER BY created_at DESC`,
       ),
       schema: AssetRowSchema,
       operation: "asset listing",
@@ -143,7 +164,10 @@ export async function getLibrary(db: D1Database): Promise<DatabaseFailureError |
 export async function findAsset({ db, id }: { db: D1Database; id: string }) {
   const assetRow = await readFirst({
     statement: db
-      .prepare("SELECT id, title, blurb, size_bytes, created_at FROM assets WHERE id = ?")
+      .prepare(
+        `SELECT id, title, blurb, object_key, size_bytes, created_at, archived_at, deleted_at
+         FROM assets WHERE id = ? AND deleted_at IS NULL`,
+      )
       .bind(id),
     schema: AssetRowSchema,
     operation: "asset lookup",
@@ -177,6 +201,19 @@ export async function requireAsset({ db, id }: { db: D1Database; id: string }) {
   if (result instanceof Error) return result
   if (result.tag === "missing") return new AssetNotFoundError({ id })
   return result.value
+}
+
+export async function findAssetStorageRecord({ db, id }: { db: D1Database; id: string }) {
+  return readFirst({
+    statement: db
+      .prepare(
+        `SELECT id, title, blurb, object_key, size_bytes, created_at, archived_at, deleted_at
+         FROM assets WHERE id = ?`,
+      )
+      .bind(id),
+    schema: AssetRowSchema,
+    operation: "asset storage record lookup",
+  })
 }
 
 export async function requireTagsBySlugs({ db, slugs }: { db: D1Database; slugs: string[] }) {
@@ -230,6 +267,94 @@ export async function insertAsset({ db, asset }: { db: D1Database; asset: Asset 
   }
 
   return requireAsset({ db, id: asset.id })
+}
+
+export async function setAssetLifecycle({
+  db,
+  id,
+  input,
+  now,
+}: {
+  db: D1Database
+  id: string
+  input: AssetLifecycleInput
+  now: Date
+}) {
+  const archivedAt = input.tag === "archived" ? now.toISOString() : null
+  const result = await db
+    .prepare("UPDATE assets SET archived_at = ? WHERE id = ? AND deleted_at IS NULL")
+    .bind(archivedAt, id)
+    .run()
+    .catch((cause) => new DatabaseFailureError({ operation: "asset lifecycle update", cause }))
+  if (result instanceof Error) return result
+  if (!result.success) return new DatabaseFailureError({ operation: "asset lifecycle update" })
+  if (result.meta.changes === 0) return new AssetNotFoundError({ id })
+  return requireAsset({ db, id })
+}
+
+export async function replaceAssetTags({
+  db,
+  id,
+  tagSlugs,
+}: {
+  db: D1Database
+  id: string
+  tagSlugs: string[]
+}) {
+  const asset = await requireAsset({ db, id })
+  if (asset instanceof Error) return asset
+  const tags = await requireTagsBySlugs({ db, slugs: Array.from(new Set(tagSlugs)) })
+  if (tags instanceof Error) return tags
+
+  const statements = [
+    db.prepare("DELETE FROM asset_tags WHERE asset_id = ?").bind(id),
+    ...tags.map((tag) =>
+      db.prepare("INSERT INTO asset_tags (asset_id, tag_id) VALUES (?, ?)").bind(id, tag.id),
+    ),
+  ]
+  const result = await db
+    .batch(statements)
+    .catch((cause) => new DatabaseFailureError({ operation: "asset tag replacement", cause }))
+  if (result instanceof Error) return result
+  if (result.some((entry) => !entry.success)) {
+    return new DatabaseFailureError({ operation: "asset tag replacement" })
+  }
+  return requireAsset({ db, id })
+}
+
+export async function beginAssetDeletion({
+  db,
+  id,
+  now,
+}: {
+  db: D1Database
+  id: string
+  now: Date
+}) {
+  const record = await findAssetStorageRecord({ db, id })
+  if (record instanceof Error) return record
+  if (record.tag === "missing") return new AssetNotFoundError({ id })
+
+  const result = await db
+    .prepare("UPDATE assets SET deleted_at = COALESCE(deleted_at, ?) WHERE id = ?")
+    .bind(now.toISOString(), id)
+    .run()
+    .catch((cause) => new DatabaseFailureError({ operation: "asset deletion start", cause }))
+  if (result instanceof Error) return result
+  if (!result.success) return new DatabaseFailureError({ operation: "asset deletion start" })
+  return { tag: "deleting" as const, objectKey: record.value.object_key }
+}
+
+export async function purgeDeletedAsset({ db, id }: { db: D1Database; id: string }) {
+  const result = await db
+    .prepare("DELETE FROM assets WHERE id = ? AND deleted_at IS NOT NULL")
+    .bind(id)
+    .run()
+    .catch((cause) => new DatabaseFailureError({ operation: "asset deletion finalization", cause }))
+  if (result instanceof Error) return result
+  if (!result.success) return new DatabaseFailureError({ operation: "asset deletion finalization" })
+  if (result.meta.changes === 0) return new AssetNotFoundError({ id })
+  return { tag: "deleted" as const, id }
 }
 
 async function findTagBySlug({ db, slug }: { db: D1Database; slug: string }) {

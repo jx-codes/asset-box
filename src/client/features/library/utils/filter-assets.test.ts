@@ -19,6 +19,7 @@ const assets: Asset[] = [
     blurb: "A polished release page",
     sizeBytes: 1024,
     createdAt: "2026-07-17T12:00:00.000Z",
+    lifecycle: { tag: "active" },
     tags: [demoTag],
   },
   {
@@ -27,6 +28,7 @@ const assets: Asset[] = [
     blurb: "An operational summary",
     sizeBytes: 2048,
     createdAt: "2026-07-16T12:00:00.000Z",
+    lifecycle: { tag: "active" },
     tags: [],
   },
 ]
@@ -60,6 +62,7 @@ describe("filterAssets", () => {
           blurb: "",
           sizeBytes: 0,
           createdAt: "2026-07-17T12:00:00.000Z",
+          lifecycle: { tag: "active" },
           tags: [],
         }),
       )

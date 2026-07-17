@@ -5,6 +5,13 @@ export type AssetSelection = { tag: "none" } | { tag: "selected"; assetId: strin
 
 export type TagFilter = { tag: "all" } | { tag: "tag"; slug: string }
 
+export type AssetView = { tag: "active" } | { tag: "archived" }
+
+export type AssetDialogState =
+  | { tag: "closed" }
+  | { tag: "editing-tags"; assetId: string; selectedSlugs: string[] }
+  | { tag: "confirming-delete"; assetId: string }
+
 export type TagManagerState =
   | { tag: "closed" }
   | { tag: "creating" }
@@ -15,6 +22,8 @@ export type LiveConnection = { tag: "connecting" } | { tag: "connected" } | { ta
 export type AssetToast = { tag: "hidden" } | { tag: "new-asset"; asset: Asset }
 
 export const library$ = observable({
+  view: { tag: "active" } as AssetView,
+  assetDialog: { tag: "closed" } as AssetDialogState,
   search: "",
   selection: { tag: "none" } as AssetSelection,
   tagFilter: { tag: "all" } as TagFilter,

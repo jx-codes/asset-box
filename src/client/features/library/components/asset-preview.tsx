@@ -1,10 +1,11 @@
 import { ArrowLeft, ExternalLink } from "lucide-react"
-import type { Asset } from "@/shared/domain"
+import type { Asset, Tag } from "@/shared/domain"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { clearAssetSelection } from "../state/library.actions"
+import { AssetActions } from "./asset-actions"
 
-export function AssetPreview({ asset }: { asset: Asset | undefined }) {
+export function AssetPreview({ asset, tags }: { asset: Asset | undefined; tags: Tag[] }) {
   if (!asset) {
     return (
       <section className="hidden min-w-0 flex-1 place-items-center bg-muted/20 md:grid">
@@ -34,6 +35,7 @@ export function AssetPreview({ asset }: { asset: Asset | undefined }) {
           <h1 className="truncate text-sm font-semibold">{asset.title}</h1>
           <p className="truncate text-xs text-muted-foreground">{asset.blurb}</p>
         </div>
+        <AssetActions asset={asset} tags={tags} />
         <Button variant="outline" size="sm" asChild>
           <a href={`/assets/${asset.id}`} target="_blank" rel="noreferrer">
             <ExternalLink className="size-3.5" />
@@ -53,6 +55,14 @@ export function AssetPreview({ asset }: { asset: Asset | undefined }) {
           <span>{(asset.sizeBytes / 1024).toFixed(1)} KB</span>
           <span aria-hidden="true">·</span>
           <code className="truncate">{asset.id.slice(0, 12)}</code>
+          {asset.lifecycle.tag === "archived" ? (
+            <>
+              <span aria-hidden="true">·</span>
+              <span>
+                Archived {new Intl.DateTimeFormat().format(new Date(asset.lifecycle.archivedAt))}
+              </span>
+            </>
+          ) : null}
           {asset.tags.map((tag) => (
             <Badge key={tag.id} variant="outline" className="ml-1 text-[10px]">
               {tag.name}

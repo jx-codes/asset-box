@@ -13,6 +13,43 @@ export function clearAssetSelection() {
   library$.selection.set({ tag: "none" })
 }
 
+export function showActiveAssets() {
+  library$.view.set({ tag: "active" })
+  library$.selection.set({ tag: "none" })
+  library$.tagFilter.set({ tag: "all" })
+}
+
+export function showArchivedAssets() {
+  library$.view.set({ tag: "archived" })
+  library$.selection.set({ tag: "none" })
+  library$.tagFilter.set({ tag: "all" })
+}
+
+export function openAssetTagEditor(asset: Asset) {
+  library$.assetDialog.set({
+    tag: "editing-tags",
+    assetId: asset.id,
+    selectedSlugs: asset.tags.map((tag) => tag.slug),
+  })
+}
+
+export function toggleAssetTag(slug: string) {
+  const dialog = library$.assetDialog.peek()
+  if (dialog.tag !== "editing-tags") return
+  const selectedSlugs = dialog.selectedSlugs.includes(slug)
+    ? dialog.selectedSlugs.filter((selected) => selected !== slug)
+    : [...dialog.selectedSlugs, slug]
+  library$.assetDialog.set({ ...dialog, selectedSlugs })
+}
+
+export function openDeleteConfirmation(assetId: string) {
+  library$.assetDialog.set({ tag: "confirming-delete", assetId })
+}
+
+export function closeAssetDialog() {
+  library$.assetDialog.set({ tag: "closed" })
+}
+
 export function filterByTag(slug: string) {
   library$.tagFilter.set({ tag: "tag", slug })
   library$.selection.set({ tag: "none" })
@@ -34,6 +71,17 @@ export function closeTagManager() {
   library$.tagManager.set({ tag: "closed" })
 }
 
+export function clearDeletedAssetSelection(assetId: string) {
+  const selection = library$.selection.peek()
+  if (selection.tag === "selected" && selection.assetId === assetId) {
+    library$.selection.set({ tag: "none" })
+  }
+  const dialog = library$.assetDialog.peek()
+  if (dialog.tag !== "closed" && dialog.assetId === assetId) {
+    library$.assetDialog.set({ tag: "closed" })
+  }
+}
+
 export function markLiveConnected() {
   library$.liveConnection.set({ tag: "connected" })
 }
@@ -44,6 +92,13 @@ export function markLiveDisconnected() {
 
 export function showNewAsset(asset: Asset) {
   library$.toast.set({ tag: "new-asset", asset })
+}
+
+export function openNewAsset(assetId: string) {
+  library$.view.set({ tag: "active" })
+  library$.tagFilter.set({ tag: "all" })
+  library$.selection.set({ tag: "selected", assetId })
+  library$.toast.set({ tag: "hidden" })
 }
 
 export function hideAssetToast() {

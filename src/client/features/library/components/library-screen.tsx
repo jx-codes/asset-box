@@ -1,14 +1,20 @@
 import { useValue } from "@legendapp/state/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { lazy, Suspense } from "react"
-import { Box, Circle, CodeXml, LogOut, Plus } from "lucide-react"
+import { Archive, Box, Circle, CodeXml, Inbox, LogOut, Plus } from "lucide-react"
 import { sessionQueryKey } from "@/client/app"
 import { api, expectApiValue } from "@/client/lib/api"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
-import { libraryQueryOptions } from "../api/library.queries"
+import { libraryQueryKey, libraryQueryOptions } from "../api/library.queries"
 import { useLiveUpdates } from "../hooks/use-live-updates"
-import { clearTagFilter, filterByTag, openTagCreator } from "../state/library.actions"
+import {
+  clearTagFilter,
+  filterByTag,
+  openTagCreator,
+  showActiveAssets,
+  showArchivedAssets,
+} from "../state/library.actions"
 import { library$ } from "../state/library.store"
 import { filterAssets } from "../utils/filter-assets"
 import { AssetList } from "./asset-list"
@@ -22,7 +28,8 @@ const TagManagerDialog = lazy(() =>
 
 export function LibraryScreen() {
   const queryClient = useQueryClient()
-  const library = useQuery(libraryQueryOptions)
+  const view = useValue(library$.view)
+  const library = useQuery(libraryQueryOptions(view.tag))
   const search = useValue(library$.search)
   const tagFilter = useValue(library$.tagFilter)
   const selection = useValue(library$.selection)
@@ -33,7 +40,7 @@ export function LibraryScreen() {
   const logout = useMutation({
     mutationFn: async () => expectApiValue(await api.logout()),
     onSuccess: async () => {
-      queryClient.removeQueries({ queryKey: libraryQueryOptions.queryKey })
+      queryClient.removeQueries({ queryKey: libraryQueryKey })
       await queryClient.invalidateQueries({ queryKey: sessionQueryKey })
     },
   })
@@ -111,10 +118,24 @@ export function LibraryScreen() {
       <div className="flex flex-none gap-1 overflow-x-auto border-b p-2 md:hidden">
         <Button
           size="xs"
+          variant={view.tag === "active" ? "default" : "outline"}
+          onClick={showActiveAssets}
+        >
+          <Inbox /> Active
+        </Button>
+        <Button
+          size="xs"
+          variant={view.tag === "archived" ? "default" : "outline"}
+          onClick={showArchivedAssets}
+        >
+          <Archive /> Archived
+        </Button>
+        <Button
+          size="xs"
           variant={tagFilter.tag === "all" ? "default" : "outline"}
           onClick={clearTagFilter}
         >
-          All
+          All {view.tag}
         </Button>
         {library.data.tags.map((tag) => (
           <Button
@@ -135,7 +156,7 @@ export function LibraryScreen() {
           totalCount={library.data.assets.length}
           mobileHidden={selection.tag === "selected"}
         />
-        <AssetPreview asset={selectedAsset} />
+        <AssetPreview asset={selectedAsset} tags={library.data.tags} />
       </div>
 
       {tagManager.tag === "closed" ? null : (

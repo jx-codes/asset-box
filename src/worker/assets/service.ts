@@ -1,8 +1,13 @@
 import * as errore from "errore"
 import { AssetSchema, type Tag, TagSlugSchema } from "@/shared/domain"
 import type { Env } from "../env"
-import { InvalidInputError, StorageFailureError } from "../errors"
-import { findAsset, insertAsset, requireTagsBySlugs } from "../data/repository"
+import { AssetDeletePendingError, InvalidInputError, StorageFailureError } from "../errors"
+import {
+  findAsset,
+  findAssetStorageRecord,
+  insertAsset,
+  requireTagsBySlugs,
+} from "../data/repository"
 
 const MAX_ASSET_BYTES = 5 * 1024 * 1024
 
@@ -61,6 +66,7 @@ function newAsset({
     blurb: input.blurb.trim(),
     sizeBytes: input.file.size,
     createdAt: now.toISOString(),
+    lifecycle: { tag: "active" },
     tags,
   })
 }
@@ -97,6 +103,10 @@ export async function uploadAsset({
   const existing = await findAsset({ db: env.ASSET_BOX_DB, id })
   if (existing instanceof Error) return existing
   if (existing.tag === "found") return { status: "duplicate" as const, asset: existing.value }
+
+  const storageRecord = await findAssetStorageRecord({ db: env.ASSET_BOX_DB, id })
+  if (storageRecord instanceof Error) return storageRecord
+  if (storageRecord.tag === "found") return new AssetDeletePendingError({ id })
 
   const tags = await requireTagsBySlugs({ db: env.ASSET_BOX_DB, slugs: tagSlugs })
   if (tags instanceof Error) return tags

@@ -26,6 +26,11 @@ export class AssetNotFoundError extends errore.createTaggedError({
   message: "Asset $id was not found",
 }) {}
 
+export class AssetDeletePendingError extends errore.createTaggedError({
+  name: "AssetDeletePendingError",
+  message: "Asset $id is waiting for storage cleanup; retry its delete request",
+}) {}
+
 export class TagNotFoundError extends errore.createTaggedError({
   name: "TagNotFoundError",
   message: "Tag $id was not found",
@@ -108,6 +113,9 @@ export function toErrorResponse(error: Error): ErrorResponse {
   }
   if (AssetNotFoundError.is(error)) {
     return response({ code: "ASSET_NOT_FOUND", message: error.message, status: 404 })
+  }
+  if (AssetDeletePendingError.is(error)) {
+    return response({ code: "ASSET_DELETE_PENDING", message: error.message, status: 409 })
   }
   if (TagNotFoundError.is(error)) {
     return response({ code: "TAG_NOT_FOUND", message: error.message, status: 404 })

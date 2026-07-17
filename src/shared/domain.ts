@@ -31,6 +31,26 @@ export const AssetIdSchema = z
   .regex(/^[a-f0-9]{64}$/, "Expected a SHA-256 asset identifier")
   .openapi("AssetId")
 
+export const AssetLifecycleSchema = z
+  .discriminatedUnion("tag", [
+    z.object({ tag: z.literal("active") }),
+    z.object({ tag: z.literal("archived"), archivedAt: z.string().datetime() }),
+  ])
+  .openapi("AssetLifecycle")
+
+export const AssetLifecycleInputSchema = z
+  .discriminatedUnion("tag", [
+    z.object({ tag: z.literal("active") }),
+    z.object({ tag: z.literal("archived") }),
+  ])
+  .openapi("AssetLifecycleInput")
+
+export const AssetTagInputSchema = z
+  .object({ tagSlugs: z.array(TagSlugSchema).max(50) })
+  .openapi("AssetTagInput")
+
+export const LibraryViewSchema = z.enum(["active", "archived"]).openapi("LibraryView")
+
 export const AssetSchema = z
   .object({
     id: AssetIdSchema,
@@ -38,6 +58,7 @@ export const AssetSchema = z
     blurb: z.string().min(1).max(280),
     sizeBytes: z.number().int().nonnegative(),
     createdAt: z.string().datetime(),
+    lifecycle: AssetLifecycleSchema,
     tags: z.array(TagSchema),
   })
   .openapi("Asset")
@@ -68,6 +89,7 @@ export const ApiErrorCodeSchema = z.enum([
   "LOGIN_THROTTLED",
   "INVALID_INPUT",
   "ASSET_NOT_FOUND",
+  "ASSET_DELETE_PENDING",
   "TAG_NOT_FOUND",
   "TAG_CONFLICT",
   "UNKNOWN_TAG",
@@ -86,10 +108,14 @@ export const ApiErrorSchema = z
   })
   .openapi("ApiError")
 
+export type AssetLifecycle = z.infer<typeof AssetLifecycleSchema>
+export type AssetLifecycleInput = z.infer<typeof AssetLifecycleInputSchema>
+export type AssetTagInput = z.infer<typeof AssetTagInputSchema>
 export type ApiErrorCode = z.infer<typeof ApiErrorCodeSchema>
 export type ApiErrorPayload = z.infer<typeof ApiErrorSchema>
 export type Asset = z.infer<typeof AssetSchema>
 export type Library = z.infer<typeof LibrarySchema>
+export type LibraryView = z.infer<typeof LibraryViewSchema>
 export type LoginInput = z.infer<typeof LoginInputSchema>
 export type Session = z.infer<typeof SessionSchema>
 export type Tag = z.infer<typeof TagSchema>

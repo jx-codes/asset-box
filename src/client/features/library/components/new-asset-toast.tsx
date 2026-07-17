@@ -2,7 +2,7 @@ import { useValue } from "@legendapp/state/react"
 import { useEffect } from "react"
 import { Box } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { hideAssetToast, selectAsset } from "../state/library.actions"
+import { hideAssetToast, openNewAsset } from "../state/library.actions"
 import { library$ } from "../state/library.store"
 
 export function NewAssetToast() {
@@ -23,14 +23,7 @@ export function NewAssetToast() {
         <p className="text-xs font-medium uppercase tracking-wide text-background/60">New asset</p>
         <p className="truncate text-sm font-semibold">{toast.asset.title}</p>
       </div>
-      <Button
-        size="sm"
-        variant="secondary"
-        onClick={() => {
-          selectAsset(toast.asset.id)
-          hideAssetToast()
-        }}
-      >
+      <Button size="sm" variant="secondary" onClick={() => openNewAsset(toast.asset.id)}>
         View
       </Button>
     </aside>

@@ -2,7 +2,13 @@ import * as errore from "errore"
 import type { z } from "zod"
 import {
   ApiErrorSchema,
+  type AssetLifecycleInput,
+  AssetLifecycleInputSchema,
+  AssetSchema,
+  type AssetTagInput,
+  AssetTagInputSchema,
   LibrarySchema,
+  type LibraryView,
   SessionSchema,
   TagInputSchema,
   TagSchema,
@@ -76,7 +82,8 @@ export const api = {
   login: (password: string) =>
     requestJson({ path: "/api/login", method: "POST", body: { password }, schema: SessionSchema }),
   logout: () => requestJson({ path: "/api/logout", method: "POST", schema: SessionSchema }),
-  library: () => requestJson({ path: "/api/library", schema: LibrarySchema }),
+  library: (view: LibraryView) =>
+    requestJson({ path: `/api/library?view=${view}`, schema: LibrarySchema }),
   createTag: (input: TagInput) =>
     requestJson({
       path: "/api/tags",
@@ -92,4 +99,19 @@ export const api = {
       schema: TagSchema,
     }),
   deleteTag: (id: string) => requestEmpty({ path: `/api/tags/${id}`, method: "DELETE" }),
+  updateAssetLifecycle: ({ id, input }: { id: string; input: AssetLifecycleInput }) =>
+    requestJson({
+      path: `/api/assets/${id}/lifecycle`,
+      method: "PUT",
+      body: AssetLifecycleInputSchema.parse(input),
+      schema: AssetSchema,
+    }),
+  updateAssetTags: ({ id, input }: { id: string; input: AssetTagInput }) =>
+    requestJson({
+      path: `/api/assets/${id}/tags`,
+      method: "PUT",
+      body: AssetTagInputSchema.parse(input),
+      schema: AssetSchema,
+    }),
+  deleteAsset: (id: string) => requestEmpty({ path: `/api/assets/${id}`, method: "DELETE" }),
 }
