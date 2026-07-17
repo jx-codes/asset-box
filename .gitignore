@@ -3,6 +3,8 @@ dist/
 coverage/
 .wrangler/
 .dev.vars*
+!.dev.vars.example
+aux/
 .env*
 !.env.example
 *.tsbuildinfo

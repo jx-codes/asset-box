@@ -17,9 +17,8 @@
     "isolatedModules": true,
     "noEmit": true,
     "jsx": "react-jsx",
-    "baseUrl": ".",
     "paths": { "@/*": ["./src/*"] },
     "types": ["vite/client"]
   },
-  "include": ["src/client", "src/shared"]
+  "include": ["src/client", "src/components", "src/lib", "src/shared"]
 }

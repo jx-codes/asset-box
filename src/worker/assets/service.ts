@@ -1,0 +1,120 @@
+import * as errore from "errore"
+import { AssetSchema, type Tag, TagSlugSchema } from "@/shared/domain"
+import type { Env } from "../env"
+import { InvalidInputError, StorageFailureError } from "../errors"
+import { findAsset, insertAsset, requireTagsBySlugs } from "../data/repository"
+
+const MAX_ASSET_BYTES = 5 * 1024 * 1024
+
+type UploadInput = {
+  file: File
+  title: string
+  blurb: string
+  tagSlugs: string[]
+}
+
+function toHex(bytes: Uint8Array) {
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")
+}
+
+function validateFile(file: File) {
+  if (file.size === 0) return new InvalidInputError({ reason: "The HTML file is empty" })
+  if (file.size > MAX_ASSET_BYTES) {
+    return new InvalidInputError({ reason: "The HTML file must be 5 MB or smaller" })
+  }
+  return { tag: "valid-file" as const }
+}
+
+function validateHtmlPrefix(bytes: ArrayBuffer) {
+  const prefix = new TextDecoder().decode(bytes.slice(0, 4096)).trimStart().toLowerCase()
+  if (prefix.startsWith("<!doctype html") || prefix.startsWith("<html")) {
+    return { tag: "valid-html" as const }
+  }
+  return new InvalidInputError({
+    reason:
+      "The uploaded file must be a complete HTML document starting with <!doctype html> or <html>",
+  })
+}
+
+function normalizeTagSlugs(tagSlugs: string[]) {
+  const parsed = errore.try({
+    try: () => Array.from(new Set(tagSlugs.map((slug) => TagSlugSchema.parse(slug)))),
+    catch: (cause) => new InvalidInputError({ reason: "One or more tag slugs are invalid", cause }),
+  })
+  return parsed
+}
+
+function newAsset({
+  id,
+  input,
+  tags,
+  now,
+}: {
+  id: string
+  input: UploadInput
+  tags: Tag[]
+  now: Date
+}) {
+  return AssetSchema.parse({
+    id,
+    title: input.title.trim(),
+    blurb: input.blurb.trim(),
+    sizeBytes: input.file.size,
+    createdAt: now.toISOString(),
+    tags,
+  })
+}
+
+export async function uploadAsset({
+  env,
+  input,
+  now,
+}: {
+  env: Env
+  input: UploadInput
+  now: Date
+}) {
+  const validFile = validateFile(input.file)
+  if (validFile instanceof Error) return validFile
+
+  const tagSlugs = normalizeTagSlugs(input.tagSlugs)
+  if (tagSlugs instanceof Error) return tagSlugs
+
+  const bytes = await input.file
+    .arrayBuffer()
+    .catch((cause) => new StorageFailureError({ operation: "upload reading", cause }))
+  if (bytes instanceof Error) return bytes
+
+  const validHtml = validateHtmlPrefix(bytes)
+  if (validHtml instanceof Error) return validHtml
+
+  const digest = await crypto.subtle
+    .digest("SHA-256", bytes)
+    .catch((cause) => new StorageFailureError({ operation: "content hashing", cause }))
+  if (digest instanceof Error) return digest
+  const id = toHex(new Uint8Array(digest))
+
+  const existing = await findAsset({ db: env.ASSET_BOX_DB, id })
+  if (existing instanceof Error) return existing
+  if (existing.tag === "found") return { status: "duplicate" as const, asset: existing.value }
+
+  const tags = await requireTagsBySlugs({ db: env.ASSET_BOX_DB, slugs: tagSlugs })
+  if (tags instanceof Error) return tags
+
+  const asset = errore.try({
+    try: () => newAsset({ id, input, tags, now }),
+    catch: (cause) => new InvalidInputError({ reason: "Asset metadata is invalid", cause }),
+  })
+  if (asset instanceof Error) return asset
+
+  const stored = await env.ASSET_BOX_BUCKET.put(`assets/${asset.id}.html`, bytes, {
+    httpMetadata: { contentType: "text/html; charset=utf-8" },
+    customMetadata: { sha256: asset.id },
+  }).catch((cause) => new StorageFailureError({ operation: "asset write", cause }))
+  if (stored instanceof Error) return stored
+
+  const inserted = await insertAsset({ db: env.ASSET_BOX_DB, asset })
+  if (inserted instanceof Error) return inserted
+
+  return { status: "created" as const, asset: inserted }
+}

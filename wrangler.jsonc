@@ -18,17 +18,11 @@
       "migrations_dir": "migrations"
     }
   ],
-  "r2_buckets": [
-    { "binding": "ASSET_BOX_BUCKET", "bucket_name": "asset-box-dev" }
-  ],
+  "r2_buckets": [{ "binding": "ASSET_BOX_BUCKET", "bucket_name": "asset-box-dev" }],
   "durable_objects": {
-    "bindings": [
-      { "name": "COORDINATOR", "class_name": "AssetBoxCoordinator" }
-    ]
+    "bindings": [{ "name": "COORDINATOR", "class_name": "AssetBoxCoordinator" }]
   },
-  "migrations": [
-    { "tag": "v1", "new_sqlite_classes": ["AssetBoxCoordinator"] }
-  ],
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["AssetBoxCoordinator"] }],
   "env": {
     "uat": {
       "name": "asset-box-uat",
@@ -40,13 +34,9 @@
           "migrations_dir": "migrations"
         }
       ],
-      "r2_buckets": [
-        { "binding": "ASSET_BOX_BUCKET", "bucket_name": "asset-box-uat" }
-      ],
+      "r2_buckets": [{ "binding": "ASSET_BOX_BUCKET", "bucket_name": "asset-box-uat" }],
       "durable_objects": {
-        "bindings": [
-          { "name": "COORDINATOR", "class_name": "AssetBoxCoordinator" }
-        ]
+        "bindings": [{ "name": "COORDINATOR", "class_name": "AssetBoxCoordinator" }]
       }
     },
     "prod": {
@@ -59,13 +49,9 @@
           "migrations_dir": "migrations"
         }
       ],
-      "r2_buckets": [
-        { "binding": "ASSET_BOX_BUCKET", "bucket_name": "asset-box" }
-      ],
+      "r2_buckets": [{ "binding": "ASSET_BOX_BUCKET", "bucket_name": "asset-box" }],
       "durable_objects": {
-        "bindings": [
-          { "name": "COORDINATOR", "class_name": "AssetBoxCoordinator" }
-        ]
+        "bindings": [{ "name": "COORDINATOR", "class_name": "AssetBoxCoordinator" }]
       }
     }
   }

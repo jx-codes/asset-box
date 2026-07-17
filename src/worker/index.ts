@@ -1,0 +1,365 @@
+import * as errore from "errore"
+import { OpenAPIHono, z } from "@hono/zod-openapi"
+import { Scalar } from "@scalar/hono-api-reference"
+import type { Context } from "hono"
+import { deleteCookie, setCookie } from "hono/cookie"
+import {
+  ApiErrorSchema,
+  AssetIdSchema,
+  LibrarySchema,
+  LoginInputSchema,
+  SessionSchema,
+  TagInputSchema,
+  TagSchema,
+  TagSlugSchema,
+  UploadResponseSchema,
+} from "@/shared/domain"
+import { uploadAsset } from "./assets/service"
+import { authorize, checkPasswordAttempt } from "./auth/authorize"
+import { createSessionToken, sessionCookieOptions } from "./auth/session"
+import { AssetBoxCoordinator } from "./coordinator"
+import { createTag, deleteTag, getLibrary, requireAsset, updateTag } from "./data/repository"
+import type { Env } from "./env"
+import {
+  InternalFailureError,
+  InvalidInputError,
+  StorageFailureError,
+  toErrorResponse,
+} from "./errors"
+
+export { AssetBoxCoordinator }
+
+type AppContext = { Bindings: Env }
+
+const app = new OpenAPIHono<AppContext>()
+
+const UploadFormSchema = z.object({
+  html: z.instanceof(File).openapi({ type: "string", format: "binary" }),
+  title: z.string().trim().min(1).max(120),
+  blurb: z.string().trim().min(1).max(280),
+  tags: z.string().default("[]"),
+})
+
+const jsonContent = <T extends z.ZodType>(schema: T, description: string) => ({
+  description,
+  content: { "application/json": { schema } },
+})
+
+const commonErrorResponses = {
+  400: jsonContent(ApiErrorSchema, "Invalid request"),
+  401: jsonContent(ApiErrorSchema, "Authentication required"),
+  404: jsonContent(ApiErrorSchema, "Resource not found"),
+  409: jsonContent(ApiErrorSchema, "Resource conflict"),
+  429: jsonContent(ApiErrorSchema, "Request throttled"),
+  500: jsonContent(ApiErrorSchema, "Storage or server failure"),
+} as const
+
+function respondError(c: Context<AppContext>, error: Error) {
+  const response = toErrorResponse(error)
+  return c.json(response.body, response.status, response.headers)
+}
+
+async function parseJsonInput<T>({
+  read,
+  schema,
+}: {
+  read: () => Promise<unknown>
+  schema: z.ZodType<T>
+}) {
+  const input = await read().catch(
+    (cause) => new InvalidInputError({ reason: "Request body is not valid JSON", cause }),
+  )
+  if (input instanceof Error) return input
+
+  return errore.try({
+    try: () => schema.parse(input),
+    catch: (cause) => new InvalidInputError({ reason: "Request body is invalid", cause }),
+  })
+}
+
+app.get("/api/session", async (c) => {
+  const auth = await authorize(c)
+  if (auth instanceof Error) {
+    if (!errore.findCause(auth, InternalFailureError)) return c.json({ authenticated: false })
+    return respondError(c, auth)
+  }
+  return c.json({ authenticated: true })
+})
+
+app.post("/api/login", async (c) => {
+  const input = await parseJsonInput({ read: () => c.req.json(), schema: LoginInputSchema })
+  if (input instanceof Error) return respondError(c, input)
+
+  const auth = await checkPasswordAttempt({ c, password: input.password })
+  if (auth instanceof Error) return respondError(c, auth)
+
+  const token = await createSessionToken({ secret: c.env.SESSION_SECRET, now: new Date() })
+  if (token instanceof Error) return respondError(c, token)
+  setCookie(c, "asset_box_session", token, sessionCookieOptions)
+  return c.json({ authenticated: true })
+})
+
+app.post("/api/logout", (c) => {
+  deleteCookie(c, "asset_box_session", { path: "/", secure: true })
+  return c.json({ authenticated: false })
+})
+
+app.get("/api/library", async (c) => {
+  const auth = await authorize(c)
+  if (auth instanceof Error) return respondError(c, auth)
+  const library = await getLibrary(c.env.ASSET_BOX_DB)
+  if (library instanceof Error) return respondError(c, library)
+  return c.json(library)
+})
+
+app.post("/api/tags", async (c) => {
+  const auth = await authorize(c)
+  if (auth instanceof Error) return respondError(c, auth)
+  const input = await parseJsonInput({ read: () => c.req.json(), schema: TagInputSchema })
+  if (input instanceof Error) return respondError(c, input)
+
+  const tag = await createTag({ db: c.env.ASSET_BOX_DB, input, now: new Date() })
+  if (tag instanceof Error) return respondError(c, tag)
+  return c.json(tag, 201)
+})
+
+app.put("/api/tags/:id", async (c) => {
+  const auth = await authorize(c)
+  if (auth instanceof Error) return respondError(c, auth)
+  const id = z.uuid().safeParse(c.req.param("id"))
+  if (!id.success) return respondError(c, new InvalidInputError({ reason: "Tag id is invalid" }))
+  const input = await parseJsonInput({ read: () => c.req.json(), schema: TagInputSchema })
+  if (input instanceof Error) return respondError(c, input)
+
+  const tag = await updateTag({ db: c.env.ASSET_BOX_DB, id: id.data, input })
+  if (tag instanceof Error) return respondError(c, tag)
+  return c.json(tag)
+})
+
+app.delete("/api/tags/:id", async (c) => {
+  const auth = await authorize(c)
+  if (auth instanceof Error) return respondError(c, auth)
+  const id = z.uuid().safeParse(c.req.param("id"))
+  if (!id.success) return respondError(c, new InvalidInputError({ reason: "Tag id is invalid" }))
+
+  const result = await deleteTag({ db: c.env.ASSET_BOX_DB, id: id.data })
+  if (result instanceof Error) return respondError(c, result)
+  return c.body(null, 204)
+})
+
+app.post("/api/assets", async (c) => {
+  const auth = await authorize(c)
+  if (auth instanceof Error) return respondError(c, auth)
+  const rawForm = await c.req
+    .formData()
+    .catch((cause) => new InvalidInputError({ reason: "Upload form is invalid", cause }))
+  if (rawForm instanceof Error) return respondError(c, rawForm)
+  const form = UploadFormSchema.safeParse(Object.fromEntries(rawForm))
+  if (!form.success) {
+    return respondError(
+      c,
+      new InvalidInputError({ reason: form.error.issues.map((issue) => issue.message).join("; ") }),
+    )
+  }
+
+  const tagSlugs = errore.try({
+    try: () => z.array(TagSlugSchema).parse(JSON.parse(form.data.tags)),
+    catch: (cause) =>
+      new InvalidInputError({ reason: "Tags must be a JSON array of tag slugs", cause }),
+  })
+  if (tagSlugs instanceof Error) return respondError(c, tagSlugs)
+
+  const result = await uploadAsset({
+    env: c.env,
+    input: {
+      file: form.data.html,
+      title: form.data.title,
+      blurb: form.data.blurb,
+      tagSlugs,
+    },
+    now: new Date(),
+  })
+  if (result instanceof Error) return respondError(c, result)
+
+  if (result.status === "created") {
+    const coordinator = c.env.COORDINATOR.get(c.env.COORDINATOR.idFromName("events"))
+    const notified = await coordinator
+      .fetch("https://coordinator/broadcast", {
+        method: "POST",
+        body: JSON.stringify({ tag: "asset-created", asset: result.asset }),
+      })
+      .catch((cause) => new InternalFailureError({ operation: "live update broadcast", cause }))
+    if (notified instanceof Error) console.warn("Asset stored, but live update failed", notified)
+    if (!(notified instanceof Error) && !notified.ok) {
+      console.warn("Asset stored, but live update returned", notified.status)
+    }
+  }
+
+  if (result.status === "created") return c.json(result, 201)
+  return c.json(result)
+})
+
+app.get("/assets/:id", async (c) => {
+  const auth = await authorize(c)
+  if (auth instanceof Error) return respondError(c, auth)
+  const id = AssetIdSchema.safeParse(c.req.param("id"))
+  if (!id.success) {
+    return respondError(c, new InvalidInputError({ reason: "Asset id is invalid" }))
+  }
+  const metadata = await requireAsset({ db: c.env.ASSET_BOX_DB, id: id.data })
+  if (metadata instanceof Error) return respondError(c, metadata)
+
+  const object = await c.env.ASSET_BOX_BUCKET.get(`assets/${id.data}.html`).catch(
+    (cause) => new StorageFailureError({ operation: "asset read", cause }),
+  )
+  if (object instanceof Error) return respondError(c, object)
+  if (object === null) {
+    return respondError(c, new StorageFailureError({ operation: "asset read" }))
+  }
+
+  return new Response(object.body, {
+    headers: {
+      "Cache-Control": "private, max-age=3600",
+      "Content-Disposition": `inline; filename="${id.data}.html"`,
+      "Content-Security-Policy":
+        "sandbox allow-scripts; default-src * data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'none'; form-action 'none'; base-uri 'none'",
+      "Content-Type": "text/html; charset=utf-8",
+      "Referrer-Policy": "no-referrer",
+      "X-Content-Type-Options": "nosniff",
+    },
+  })
+})
+
+app.get("/api/events", async (c) => {
+  const auth = await authorize(c)
+  if (auth instanceof Error) return respondError(c, auth)
+  const coordinator = c.env.COORDINATOR.get(c.env.COORDINATOR.idFromName("events"))
+  return coordinator.fetch("https://coordinator/events")
+})
+
+app.openAPIRegistry.registerComponent("securitySchemes", "sessionCookie", {
+  type: "apiKey",
+  in: "cookie",
+  name: "asset_box_session",
+})
+app.openAPIRegistry.registerComponent("securitySchemes", "bearerPassword", {
+  type: "http",
+  scheme: "bearer",
+  description: "Use the Asset Box password as the bearer token for agent and CLI access.",
+})
+
+const protectedSecurity: Record<string, string[]>[] = [
+  { sessionCookie: [] },
+  { bearerPassword: [] },
+]
+
+app.openAPIRegistry.registerPath({
+  method: "get",
+  path: "/api/session",
+  tags: ["Authentication"],
+  responses: { ...commonErrorResponses, 200: jsonContent(SessionSchema, "Authentication state") },
+})
+app.openAPIRegistry.registerPath({
+  method: "post",
+  path: "/api/login",
+  tags: ["Authentication"],
+  request: { body: { content: { "application/json": { schema: LoginInputSchema } } } },
+  responses: { ...commonErrorResponses, 200: jsonContent(SessionSchema, "Authenticated session") },
+})
+app.openAPIRegistry.registerPath({
+  method: "post",
+  path: "/api/logout",
+  tags: ["Authentication"],
+  responses: { 200: jsonContent(SessionSchema, "Signed-out session") },
+})
+app.openAPIRegistry.registerPath({
+  method: "get",
+  path: "/api/library",
+  tags: ["Library"],
+  security: protectedSecurity,
+  responses: { ...commonErrorResponses, 200: jsonContent(LibrarySchema, "Asset library") },
+})
+app.openAPIRegistry.registerPath({
+  method: "post",
+  path: "/api/tags",
+  tags: ["Tags"],
+  security: protectedSecurity,
+  request: { body: { content: { "application/json": { schema: TagInputSchema } } } },
+  responses: { ...commonErrorResponses, 201: jsonContent(TagSchema, "Created tag") },
+})
+app.openAPIRegistry.registerPath({
+  method: "put",
+  path: "/api/tags/{id}",
+  tags: ["Tags"],
+  security: protectedSecurity,
+  request: {
+    params: z.object({ id: z.uuid() }),
+    body: { content: { "application/json": { schema: TagInputSchema } } },
+  },
+  responses: { ...commonErrorResponses, 200: jsonContent(TagSchema, "Updated tag") },
+})
+app.openAPIRegistry.registerPath({
+  method: "delete",
+  path: "/api/tags/{id}",
+  tags: ["Tags"],
+  security: protectedSecurity,
+  request: { params: z.object({ id: z.uuid() }) },
+  responses: { ...commonErrorResponses, 204: { description: "Tag deleted" } },
+})
+app.openAPIRegistry.registerPath({
+  method: "post",
+  path: "/api/assets",
+  tags: ["Assets"],
+  security: protectedSecurity,
+  request: {
+    body: { content: { "multipart/form-data": { schema: UploadFormSchema } } },
+  },
+  responses: {
+    ...commonErrorResponses,
+    200: jsonContent(UploadResponseSchema, "Existing duplicate asset"),
+    201: jsonContent(UploadResponseSchema, "Created asset"),
+  },
+})
+
+app.use("/api/openapi.json", async (c, next) => {
+  const auth = await authorize(c)
+  if (auth instanceof Error) return respondError(c, auth)
+  return next()
+})
+app.use("/api/docs", async (c, next) => {
+  const auth = await authorize(c)
+  if (auth instanceof Error) return respondError(c, auth)
+  return next()
+})
+
+app.doc("/api/openapi.json", {
+  openapi: "3.1.0",
+  info: {
+    title: "Asset Box API",
+    version: "0.1.0",
+    description: "Upload hash-addressed HTML assets and manage agent guidance tags.",
+  },
+})
+
+app.get(
+  "/api/docs",
+  Scalar({
+    spec: { url: "/api/openapi.json" },
+    pageTitle: "Asset Box API",
+    theme: "alternate",
+  }),
+)
+
+app.notFound((c) => {
+  if (c.req.path.startsWith("/api/") || c.req.path.startsWith("/assets/")) {
+    return c.json({ error: { code: "ASSET_NOT_FOUND" as const, message: "Route not found" } }, 404)
+  }
+  return c.env.ASSETS.fetch(c.req.raw)
+})
+
+app.onError((error, c) => {
+  console.error("Unhandled Worker error", error)
+  return respondError(c, new InternalFailureError({ operation: "request handling", cause: error }))
+})
+
+export default app
