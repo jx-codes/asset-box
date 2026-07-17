@@ -1,0 +1,72 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "asset-box-dev",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-07-17",
+  "compatibility_flags": ["nodejs_compat"],
+  "placement": { "mode": "smart" },
+  "assets": {
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*", "/assets/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "ASSET_BOX_DB",
+      "database_name": "asset-box-dev",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    { "binding": "ASSET_BOX_BUCKET", "bucket_name": "asset-box-dev" }
+  ],
+  "durable_objects": {
+    "bindings": [
+      { "name": "COORDINATOR", "class_name": "AssetBoxCoordinator" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["AssetBoxCoordinator"] }
+  ],
+  "env": {
+    "uat": {
+      "name": "asset-box-uat",
+      "d1_databases": [
+        {
+          "binding": "ASSET_BOX_DB",
+          "database_name": "asset-box-uat",
+          "database_id": "11111111-1111-1111-1111-111111111111",
+          "migrations_dir": "migrations"
+        }
+      ],
+      "r2_buckets": [
+        { "binding": "ASSET_BOX_BUCKET", "bucket_name": "asset-box-uat" }
+      ],
+      "durable_objects": {
+        "bindings": [
+          { "name": "COORDINATOR", "class_name": "AssetBoxCoordinator" }
+        ]
+      }
+    },
+    "prod": {
+      "name": "asset-box",
+      "d1_databases": [
+        {
+          "binding": "ASSET_BOX_DB",
+          "database_name": "asset-box",
+          "database_id": "22222222-2222-2222-2222-222222222222",
+          "migrations_dir": "migrations"
+        }
+      ],
+      "r2_buckets": [
+        { "binding": "ASSET_BOX_BUCKET", "bucket_name": "asset-box" }
+      ],
+      "durable_objects": {
+        "bindings": [
+          { "name": "COORDINATOR", "class_name": "AssetBoxCoordinator" }
+        ]
+      }
+    }
+  }
+}
