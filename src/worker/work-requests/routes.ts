@@ -13,6 +13,7 @@ import {
   WorkRequestIdSchema,
   WorkRequestListSchema,
   WorkRequestSchema,
+  WorkRequestStatusListSchema,
   WorkResultPushInputSchema,
   WorkResultSchema,
 } from "@/shared/work-requests"
@@ -27,6 +28,7 @@ import {
   submitAllDraftComments,
   submitComment,
 } from "../data/work-request-repository"
+import { listWorkRequestStatuses } from "../data/work-request-status-repository"
 import { InvalidInputError } from "../errors"
 import {
   type AppContext,
@@ -67,6 +69,18 @@ export function registerWorkRequestRoutes(app: OpenAPIHono<AppContext>) {
     if (query instanceof Error) return respondError(c, query)
 
     const requests = await listWorkRequests({ db: c.env.ASSET_BOX_DB, query, now: new Date() })
+    if (requests instanceof Error) return respondError(c, requests)
+    return c.json(requests)
+  })
+
+  app.get("/api/work-request-statuses", async (c) => {
+    const auth = await authorizeBrowserSession(c)
+    if (auth instanceof Error) return respondError(c, auth)
+
+    const requests = await listWorkRequestStatuses({
+      db: c.env.ASSET_BOX_DB,
+      now: new Date(),
+    })
     if (requests instanceof Error) return respondError(c, requests)
     return c.json(requests)
   })
@@ -268,6 +282,16 @@ export function registerWorkRequestRoutes(app: OpenAPIHono<AppContext>) {
     responses: {
       ...commonErrorResponses,
       200: jsonContent(WorkRequestListSchema, "Durable browser-visible work requests"),
+    },
+  })
+  app.openAPIRegistry.registerPath({
+    method: "get",
+    path: "/api/work-request-statuses",
+    tags: ["Work requests"],
+    security: browserSessionSecurity,
+    responses: {
+      ...commonErrorResponses,
+      200: jsonContent(WorkRequestStatusListSchema, "Status of every durable work request"),
     },
   })
   app.openAPIRegistry.registerPath({

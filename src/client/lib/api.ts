@@ -27,6 +27,7 @@ import {
   WorkRequestCreateInputSchema,
   WorkRequestListSchema,
   WorkRequestSchema,
+  WorkRequestStatusListSchema,
 } from "@/shared/work-requests"
 
 export class ApiRequestError extends errore.createTaggedError({
@@ -106,6 +107,8 @@ export const api = {
           : "/api/work-requests?kind=new",
       schema: WorkRequestListSchema,
     }),
+  workRequestStatuses: () =>
+    requestJson({ path: "/api/work-request-statuses", schema: WorkRequestStatusListSchema }),
   createWorkRequest: (input: WorkRequestCreateInput) =>
     requestJson({
       path: "/api/work-requests",

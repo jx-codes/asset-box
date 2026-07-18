@@ -1,20 +1,57 @@
 import { useQuery } from "@tanstack/react-query"
 import { CheckCircle2, CircleDashed, Clock3, LoaderCircle } from "lucide-react"
-import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import type { WorkRequest } from "@/shared/work-requests"
-import { newAssetWorkRequestsQueryOptions } from "../api/work-request.queries"
+import { Button } from "@/components/ui/button"
+import type { WorkRequestStatusSummary } from "@/shared/work-requests"
+import { workRequestStatusQueryOptions } from "../api/work-request.queries"
 
 const dateTimeFormatter = new Intl.DateTimeFormat(undefined, {
   dateStyle: "medium",
   timeStyle: "short",
 })
 
+type AssetEditRequestStatus = WorkRequestStatusSummary & {
+  target: Extract<WorkRequestStatusSummary["target"], { tag: "asset-edit" }>
+}
+
+type AssetRequestGroup = {
+  assetId: string
+  title: string
+  blurb: string
+  requests: AssetEditRequestStatus[]
+}
+
+export function groupWorkRequestStatuses(requests: WorkRequestStatusSummary[]) {
+  const newAssetRequests: WorkRequestStatusSummary[] = []
+  const groupsByAssetId = new Map<string, AssetRequestGroup>()
+
+  for (const request of requests) {
+    if (request.target.tag === "new-asset") {
+      newAssetRequests.push(request)
+      continue
+    }
+
+    const existing = groupsByAssetId.get(request.target.parentAssetId)
+    if (existing) {
+      existing.requests.push(request as AssetEditRequestStatus)
+      continue
+    }
+    groupsByAssetId.set(request.target.parentAssetId, {
+      assetId: request.target.parentAssetId,
+      title: request.target.title,
+      blurb: request.target.blurb,
+      requests: [request as AssetEditRequestStatus],
+    })
+  }
+
+  return { newAssetRequests, assetGroups: Array.from(groupsByAssetId.values()) }
+}
+
 function formatDateTime(value: string) {
   return dateTimeFormatter.format(new Date(value))
 }
 
-function RequestLifecycleBadge({ request }: { request: WorkRequest }) {
+function RequestLifecycleBadge({ request }: { request: WorkRequestStatusSummary }) {
   const lifecycle = request.lifecycle
   switch (lifecycle.tag) {
     case "draft":
@@ -44,7 +81,7 @@ function RequestLifecycleBadge({ request }: { request: WorkRequest }) {
   }
 }
 
-function RequestLifecycleDetail({ request }: { request: WorkRequest }) {
+function RequestLifecycleDetail({ request }: { request: WorkRequestStatusSummary }) {
   const lifecycle = request.lifecycle
   switch (lifecycle.tag) {
     case "draft":
@@ -58,8 +95,74 @@ function RequestLifecycleDetail({ request }: { request: WorkRequest }) {
   }
 }
 
+function RequestStatusItem({
+  request,
+  showTargetTitle,
+}: {
+  request: WorkRequestStatusSummary
+  showTargetTitle: boolean
+}) {
+  const instruction =
+    request.latestCommentBody ??
+    (request.target.tag === "new-asset" ? request.target.blurb : "No instructions added.")
+
+  return (
+    <li className="border bg-card p-3">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          {showTargetTitle ? (
+            <p className="truncate text-sm font-semibold">{request.target.title}</p>
+          ) : null}
+          <p
+            className={`${showTargetTitle ? "mt-1 text-xs text-muted-foreground" : "text-sm"} line-clamp-3 leading-5`}
+          >
+            {instruction}
+          </p>
+        </div>
+        <RequestLifecycleBadge request={request} />
+      </div>
+      <p className="mt-2 text-[11px] text-muted-foreground">
+        <RequestLifecycleDetail request={request} />
+      </p>
+      <time className="mt-1 block text-[11px] text-muted-foreground" dateTime={request.createdAt}>
+        Requested {formatDateTime(request.createdAt)}
+      </time>
+    </li>
+  )
+}
+
+function RequestGroup({
+  title,
+  description,
+  requests,
+  showTargetTitles,
+}: {
+  title: string
+  description: string
+  requests: WorkRequestStatusSummary[]
+  showTargetTitles: boolean
+}) {
+  return (
+    <section>
+      <header className="border-y bg-muted/40 px-3 py-2">
+        <h3 className="truncate text-xs font-semibold">{title}</h3>
+        <p className="mt-0.5 line-clamp-1 text-[11px] text-muted-foreground">{description}</p>
+      </header>
+      <ol className="space-y-2 p-3">
+        {requests.map((request) => (
+          <RequestStatusItem
+            key={request.requestId}
+            request={request}
+            showTargetTitle={showTargetTitles}
+          />
+        ))}
+      </ol>
+    </section>
+  )
+}
+
 export function RequestStatusList() {
-  const requests = useQuery(newAssetWorkRequestsQueryOptions())
+  const requests = useQuery(workRequestStatusQueryOptions())
 
   if (requests.isPending) {
     return <p className="p-4 text-sm text-muted-foreground">Loading requests…</p>
@@ -81,38 +184,32 @@ export function RequestStatusList() {
       <div className="p-4">
         <p className="text-sm font-medium">No requests yet</p>
         <p className="mt-1 text-xs leading-5 text-muted-foreground">
-          New asset requests will appear here as soon as they are submitted.
+          Submitted work will appear here with its current status.
         </p>
       </div>
     )
   }
 
+  const groups = groupWorkRequestStatuses(requests.data.requests)
   return (
-    <ol className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3" aria-label="Asset requests">
-      {requests.data.requests.map((request) => {
-        const target = request.target
-        const title = target.tag === "new-asset" ? target.title : target.asset.title
-        const blurb = target.tag === "new-asset" ? target.blurb : target.asset.blurb
-
-        return (
-          <li key={request.id} className="border bg-card p-3">
-            <div className="flex items-start justify-between gap-2">
-              <p className="min-w-0 truncate text-sm font-semibold">{title}</p>
-              <RequestLifecycleBadge request={request} />
-            </div>
-            <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">{blurb}</p>
-            <p className="mt-2 text-[11px] text-muted-foreground">
-              <RequestLifecycleDetail request={request} />
-            </p>
-            <time
-              className="mt-1 block text-[11px] text-muted-foreground"
-              dateTime={request.createdAt}
-            >
-              Requested {formatDateTime(request.createdAt)}
-            </time>
-          </li>
-        )
-      })}
-    </ol>
+    <div className="min-h-0 flex-1 overflow-y-auto">
+      {groups.newAssetRequests.length === 0 ? null : (
+        <RequestGroup
+          title="New assets"
+          description="Requests to create an asset."
+          requests={groups.newAssetRequests}
+          showTargetTitles
+        />
+      )}
+      {groups.assetGroups.map((group) => (
+        <RequestGroup
+          key={group.assetId}
+          title={group.title}
+          description={group.blurb}
+          requests={group.requests}
+          showTargetTitles={false}
+        />
+      ))}
+    </div>
   )
 }

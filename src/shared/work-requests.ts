@@ -147,6 +147,20 @@ export const AgentWorkTargetSchema = z
   ])
   .openapi("AgentWorkTarget")
 
+export const WorkRequestStatusSummarySchema = z
+  .object({
+    requestId: WorkRequestIdSchema,
+    target: AgentWorkTargetSchema,
+    createdAt: z.string().datetime(),
+    lifecycle: WorkRequestLifecycleSchema,
+    latestCommentBody: WorkCommentBodySchema.nullable(),
+  })
+  .openapi("WorkRequestStatusSummary")
+
+export const WorkRequestStatusListSchema = z
+  .object({ requests: z.array(WorkRequestStatusSummarySchema) })
+  .openapi("WorkRequestStatusList")
+
 export const AgentWorkSummarySchema = z
   .object({
     requestId: WorkRequestIdSchema,
@@ -232,6 +246,8 @@ export type WorkPullContext = z.infer<typeof WorkPullContextSchema>
 export type WorkRequest = z.infer<typeof WorkRequestSchema>
 export type WorkRequestCreateInput = z.infer<typeof WorkRequestCreateInputSchema>
 export type WorkRequestListQuery = z.infer<typeof WorkRequestListQuerySchema>
+export type WorkRequestStatusList = z.infer<typeof WorkRequestStatusListSchema>
+export type WorkRequestStatusSummary = z.infer<typeof WorkRequestStatusSummarySchema>
 export type WorkResult = z.infer<typeof WorkResultSchema>
 export type WorkResultPushInput = z.infer<typeof WorkResultPushInputSchema>
 export type WorkResultLifecycle = z.infer<typeof WorkResultLifecycleSchema>
