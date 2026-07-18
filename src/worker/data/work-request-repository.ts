@@ -298,28 +298,63 @@ export async function createWorkRequest({
   input: WorkRequestCreateInput
   now: Date
 }) {
-  const metadata = await (async () => {
+  const creation = await (async () => {
     if (input.tag === "new-asset") {
-      return { parentAssetId: null, title: input.title, blurb: input.blurb }
+      return {
+        tag: "new-asset" as const,
+        parentAssetId: null,
+        title: input.title,
+        blurb: input.blurb,
+        initialCommentId: crypto.randomUUID(),
+      }
     }
     const asset = await requireAsset({ db, id: input.parentAssetId })
     if (asset instanceof Error) return asset
-    return { parentAssetId: asset.id, title: asset.title, blurb: asset.blurb }
+    return {
+      tag: "asset-edit" as const,
+      parentAssetId: asset.id,
+      title: asset.title,
+      blurb: asset.blurb,
+    }
   })()
-  if (metadata instanceof Error) return metadata
+  if (creation instanceof Error) return creation
 
   const id = crypto.randomUUID()
   const createdAt = now.toISOString()
-  const result = await db
+  const requestInsert = db
     .prepare(
       `INSERT INTO work_requests (id, parent_asset_id, title, blurb, created_at)
        VALUES (?, ?, ?, ?, ?)`,
     )
-    .bind(id, metadata.parentAssetId, metadata.title, metadata.blurb, createdAt)
+    .bind(id, creation.parentAssetId, creation.title, creation.blurb, createdAt)
+
+  if (creation.tag === "new-asset") {
+    const results = await db
+      .batch([
+        requestInsert,
+        db
+          .prepare(
+            `INSERT INTO request_comments
+              (id, request_id, body, created_at, submitted_at)
+             VALUES (?, ?, ?, ?, ?)`,
+          )
+          .bind(creation.initialCommentId, id, creation.blurb, createdAt, createdAt),
+      ])
+      .catch(
+        (cause) => new DatabaseFailureError({ operation: "new asset request creation", cause }),
+      )
+    if (results instanceof Error) return results
+    if (results.some((result) => !result.success)) {
+      return new DatabaseFailureError({ operation: "new asset request creation" })
+    }
+    return requireWorkRequest({ db, id, now })
+  }
+
+  const result = await requestInsert
     .run()
-    .catch((cause) => new DatabaseFailureError({ operation: "work request creation", cause }))
+    .catch((cause) => new DatabaseFailureError({ operation: "asset edit request creation", cause }))
   if (result instanceof Error) return result
-  if (!result.success) return new DatabaseFailureError({ operation: "work request creation" })
+  if (!result.success) return new DatabaseFailureError({ operation: "asset edit request creation" })
   return requireWorkRequest({ db, id, now })
 }
 

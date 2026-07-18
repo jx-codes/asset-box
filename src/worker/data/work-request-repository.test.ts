@@ -3,8 +3,9 @@ import type { Asset } from "@/shared/domain"
 import type { WorkClaim } from "@/shared/work-requests"
 import {
   claimWorkRequest,
-  listAgentWork,
+  createWorkRequest,
   getClaimContext,
+  listAgentWork,
   requireOwnedClaim,
   submitAllDraftComments,
 } from "./work-request-repository"
@@ -41,6 +42,71 @@ function statement(
 }
 
 describe("work request repository invariants", () => {
+  it("creates a new asset as submitted work in one D1 batch", async () => {
+    const captured: CapturedStatement[] = []
+    const batched: CapturedStatement[] = []
+    const requestRow = {
+      id: requestId,
+      parent_asset_id: null,
+      title: "New diagram",
+      blurb: "A system overview.",
+      created_at: now.toISOString(),
+      active_claim_id: null,
+      active_claim_principal_id: null,
+      active_claim_expires_at: null,
+      completed_at: null,
+    }
+    const db = {
+      prepare: (sql: string) => {
+        const results = sql.includes("FROM work_requests wr")
+          ? { first: requestRow }
+          : sql.includes("FROM request_comments")
+            ? {
+                all: [
+                  {
+                    id: "b809d763-f56f-4a0f-9eb9-fae9d8562f17",
+                    request_id: requestId,
+                    body: "A system overview.",
+                    created_at: now.toISOString(),
+                    submitted_at: now.toISOString(),
+                    resolved_at: null,
+                    resolved_by_asset_id: null,
+                  },
+                ],
+              }
+            : {}
+        return statement(sql, captured, results)
+      },
+      batch: async (_statements: D1PreparedStatement[]) => {
+        batched.push(...captured.slice(0, 2))
+        return [
+          { success: true, meta: { changes: 1 } },
+          { success: true, meta: { changes: 1 } },
+        ] as D1Result[]
+      },
+    } as unknown as D1Database
+
+    const result = await createWorkRequest({
+      db,
+      input: { tag: "new-asset", title: "New diagram", blurb: "A system overview." },
+      now,
+    })
+
+    expect(result).not.toBeInstanceOf(Error)
+    expect(batched[0]?.sql).toContain("INSERT INTO work_requests")
+    expect(batched[1]?.sql).toContain("INSERT INTO request_comments")
+    expect(batched[1]?.sql).toContain("submitted_at")
+    expect(batched[1]?.bindings.slice(2)).toEqual([
+      "A system overview.",
+      now.toISOString(),
+      now.toISOString(),
+    ])
+    expect(result).toMatchObject({
+      lifecycle: { tag: "submitted" },
+      comments: [{ body: "A system overview.", lifecycle: { tag: "submitted" } }],
+    })
+  })
+
   it("agent listing selects only submitted unresolved comments", async () => {
     const captured: CapturedStatement[] = []
     const db = {
