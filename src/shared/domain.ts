@@ -76,6 +76,62 @@ export const LoginInputSchema = z
   .object({ password: z.string().min(1).max(1024) })
   .openapi("LoginInput")
 
+export const ServiceTokenSecretSchema = z
+  .string()
+  .regex(/^abx_[A-Za-z0-9_-]{43}$/)
+  .openapi("ServiceTokenSecret")
+
+export const ServiceTokenInputSchema = z
+  .object({
+    name: z.string().trim().min(1).max(80),
+    expiresAt: z.string().datetime().optional(),
+  })
+  .openapi("ServiceTokenInput")
+
+export const ServiceTokenUsageSchema = z
+  .discriminatedUnion("tag", [
+    z.object({ tag: z.literal("never-used") }),
+    z.object({ tag: z.literal("used"), lastUsedAt: z.string().datetime() }),
+  ])
+  .openapi("ServiceTokenUsage")
+
+export const ServiceTokenExpirationSchema = z
+  .discriminatedUnion("tag", [
+    z.object({ tag: z.literal("never") }),
+    z.object({ tag: z.literal("scheduled"), expiresAt: z.string().datetime() }),
+  ])
+  .openapi("ServiceTokenExpiration")
+
+export const ServiceTokenStatusSchema = z
+  .discriminatedUnion("tag", [
+    z.object({ tag: z.literal("active"), expiration: ServiceTokenExpirationSchema }),
+    z.object({ tag: z.literal("expired"), expiredAt: z.string().datetime() }),
+    z.object({ tag: z.literal("revoked"), revokedAt: z.string().datetime() }),
+  ])
+  .openapi("ServiceTokenStatus")
+
+export const ServiceTokenSchema = z
+  .object({
+    id: z.string().uuid(),
+    name: z.string().min(1).max(80),
+    prefix: z.string().regex(/^abx_[A-Za-z0-9_-]{8}$/),
+    createdAt: z.string().datetime(),
+    usage: ServiceTokenUsageSchema,
+    status: ServiceTokenStatusSchema,
+  })
+  .openapi("ServiceToken")
+
+export const ServiceTokenListSchema = z
+  .object({ serviceTokens: z.array(ServiceTokenSchema) })
+  .openapi("ServiceTokenList")
+
+export const ServiceTokenCreatedSchema = z
+  .object({
+    serviceToken: ServiceTokenSchema,
+    token: ServiceTokenSecretSchema,
+  })
+  .openapi("ServiceTokenCreated")
+
 export const UploadResponseSchema = z
   .object({
     status: z.enum(["created", "duplicate"]),
@@ -90,6 +146,7 @@ export const ApiErrorCodeSchema = z.enum([
   "INVALID_INPUT",
   "ASSET_NOT_FOUND",
   "ASSET_DELETE_PENDING",
+  "SERVICE_TOKEN_NOT_FOUND",
   "TAG_NOT_FOUND",
   "TAG_CONFLICT",
   "UNKNOWN_TAG",
@@ -118,6 +175,10 @@ export type Library = z.infer<typeof LibrarySchema>
 export type LibraryView = z.infer<typeof LibraryViewSchema>
 export type LoginInput = z.infer<typeof LoginInputSchema>
 export type Session = z.infer<typeof SessionSchema>
+export type ServiceToken = z.infer<typeof ServiceTokenSchema>
+export type ServiceTokenCreated = z.infer<typeof ServiceTokenCreatedSchema>
+export type ServiceTokenInput = z.infer<typeof ServiceTokenInputSchema>
+export type ServiceTokenList = z.infer<typeof ServiceTokenListSchema>
 export type Tag = z.infer<typeof TagSchema>
 export type TagInput = z.infer<typeof TagInputSchema>
 export type UploadResponse = z.infer<typeof UploadResponseSchema>

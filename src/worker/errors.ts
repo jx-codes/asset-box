@@ -31,6 +31,11 @@ export class AssetDeletePendingError extends errore.createTaggedError({
   message: "Asset $id is waiting for storage cleanup; retry its delete request",
 }) {}
 
+export class ServiceTokenNotFoundError extends errore.createTaggedError({
+  name: "ServiceTokenNotFoundError",
+  message: "Service token $id was not found",
+}) {}
+
 export class TagNotFoundError extends errore.createTaggedError({
   name: "TagNotFoundError",
   message: "Tag $id was not found",
@@ -116,6 +121,9 @@ export function toErrorResponse(error: Error): ErrorResponse {
   }
   if (AssetDeletePendingError.is(error)) {
     return response({ code: "ASSET_DELETE_PENDING", message: error.message, status: 409 })
+  }
+  if (ServiceTokenNotFoundError.is(error)) {
+    return response({ code: "SERVICE_TOKEN_NOT_FOUND", message: error.message, status: 404 })
   }
   if (TagNotFoundError.is(error)) {
     return response({ code: "TAG_NOT_FOUND", message: error.message, status: 404 })

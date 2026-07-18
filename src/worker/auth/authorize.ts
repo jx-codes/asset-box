@@ -1,7 +1,7 @@
 import * as errore from "errore"
 import type { Context } from "hono"
 import { getCookie } from "hono/cookie"
-import { z } from "zod"
+import { authenticateServiceTokenHash } from "../data/service-token-repository"
 import type { Env } from "../env"
 import {
   AuthRequiredError,
@@ -11,8 +11,9 @@ import {
 } from "../errors"
 import { AttemptResultSchema } from "../coordinator"
 import { verifySessionToken } from "./session"
+import { hashServiceToken, isServiceToken } from "./service-token"
 
-const AuthorizationSchema = z.string().regex(/^Bearer .+$/)
+const BEARER_PREFIX = "Bearer "
 
 async function secretMatches({ candidate, expected }: { candidate: string; expected: string }) {
   const [candidateHash, expectedHash] = await Promise.all([
@@ -76,14 +77,7 @@ export async function checkPasswordAttempt({
   return { tag: "authenticated" as const }
 }
 
-export async function authorize(c: Context<{ Bindings: Env }>) {
-  const authorization = c.req.header("Authorization")
-  if (authorization) {
-    const parsed = AuthorizationSchema.safeParse(authorization)
-    if (!parsed.success) return new AuthRequiredError()
-    return checkPasswordAttempt({ c, password: parsed.data.slice("Bearer ".length) })
-  }
-
+export async function authorizeBrowserSession(c: Context<{ Bindings: Env }>) {
   const token = getCookie(c, "asset_box_session")
   if (!token) return new AuthRequiredError()
 
@@ -94,5 +88,34 @@ export async function authorize(c: Context<{ Bindings: Env }>) {
   })
   if (verified instanceof Error) return verified
   if (!verified) return new AuthRequiredError()
-  return { tag: "authenticated" as const }
+  return { tag: "browser-session" as const }
+}
+
+async function authorizeServiceToken({
+  c,
+  token,
+}: {
+  c: Context<{ Bindings: Env }>
+  token: string
+}) {
+  if (!isServiceToken(token)) return new AuthRequiredError()
+  const tokenHash = await hashServiceToken(token)
+  if (tokenHash instanceof Error) return tokenHash
+
+  const authenticated = await authenticateServiceTokenHash({
+    db: c.env.ASSET_BOX_DB,
+    tokenHash,
+    now: new Date(),
+  })
+  if (authenticated instanceof Error) return authenticated
+  if (authenticated.tag === "missing") return new AuthRequiredError()
+  return { tag: "service-token" as const, tokenId: authenticated.value.id }
+}
+
+export async function authorize(c: Context<{ Bindings: Env }>) {
+  const authorization = c.req.header("Authorization")
+  if (!authorization) return authorizeBrowserSession(c)
+  if (!authorization.startsWith(BEARER_PREFIX)) return new AuthRequiredError()
+
+  return authorizeServiceToken({ c, token: authorization.slice(BEARER_PREFIX.length) })
 }

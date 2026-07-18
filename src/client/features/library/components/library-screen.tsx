@@ -1,7 +1,7 @@
 import { useValue } from "@legendapp/state/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { lazy, Suspense } from "react"
-import { Archive, Box, Circle, CodeXml, Inbox, LogOut, Plus } from "lucide-react"
+import { Archive, Box, Circle, CodeXml, Inbox, KeyRound, LogOut, Plus } from "lucide-react"
 import { sessionQueryKey } from "@/client/app"
 import { api, expectApiValue } from "@/client/lib/api"
 import { Button } from "@/components/ui/button"
@@ -12,6 +12,7 @@ import {
   clearTagFilter,
   filterByTag,
   openTagCreator,
+  openServiceTokenManager,
   showActiveAssets,
   showArchivedAssets,
 } from "../state/library.actions"
@@ -25,6 +26,9 @@ import { TagSidebar } from "./tag-sidebar"
 const TagManagerDialog = lazy(() =>
   import("./tag-manager-dialog").then((module) => ({ default: module.TagManagerDialog })),
 )
+const ServiceTokenDialog = lazy(() =>
+  import("./service-token-dialog").then((module) => ({ default: module.ServiceTokenDialog })),
+)
 
 export function LibraryScreen() {
   const queryClient = useQueryClient()
@@ -35,6 +39,7 @@ export function LibraryScreen() {
   const selection = useValue(library$.selection)
   const liveConnection = useValue(library$.liveConnection)
   const tagManager = useValue(library$.tagManager)
+  const serviceTokenManager = useValue(library$.serviceTokenManager)
   useLiveUpdates()
 
   const logout = useMutation({
@@ -97,6 +102,14 @@ export function LibraryScreen() {
             aria-label="Create tag"
           >
             <Plus />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={openServiceTokenManager}
+            aria-label="Manage service tokens"
+          >
+            <KeyRound />
           </Button>
           <Button variant="ghost" size="icon-sm" asChild>
             <a href="/api/docs" target="_blank" rel="noreferrer" aria-label="API documentation">
@@ -162,6 +175,11 @@ export function LibraryScreen() {
       {tagManager.tag === "closed" ? null : (
         <Suspense fallback={null}>
           <TagManagerDialog tags={library.data.tags} />
+        </Suspense>
+      )}
+      {serviceTokenManager.tag === "closed" ? null : (
+        <Suspense fallback={null}>
+          <ServiceTokenDialog />
         </Suspense>
       )}
       <NewAssetToast />

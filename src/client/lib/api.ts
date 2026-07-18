@@ -9,6 +9,11 @@ import {
   AssetTagInputSchema,
   LibrarySchema,
   type LibraryView,
+  ServiceTokenCreatedSchema,
+  type ServiceTokenInput,
+  ServiceTokenInputSchema,
+  ServiceTokenListSchema,
+  ServiceTokenSchema,
   SessionSchema,
   TagInputSchema,
   TagSchema,
@@ -28,7 +33,7 @@ async function requestJson<T>({
 }: {
   path: string
   schema: z.ZodType<T>
-  method?: "GET" | "POST" | "PUT"
+  method?: "GET" | "POST" | "PUT" | "DELETE"
   body?: unknown
 }) {
   const response = await fetch(path, {
@@ -84,6 +89,20 @@ export const api = {
   logout: () => requestJson({ path: "/api/logout", method: "POST", schema: SessionSchema }),
   library: (view: LibraryView) =>
     requestJson({ path: `/api/library?view=${view}`, schema: LibrarySchema }),
+  serviceTokens: () => requestJson({ path: "/api/service-tokens", schema: ServiceTokenListSchema }),
+  createServiceToken: (input: ServiceTokenInput) =>
+    requestJson({
+      path: "/api/service-tokens",
+      method: "POST",
+      body: ServiceTokenInputSchema.parse(input),
+      schema: ServiceTokenCreatedSchema,
+    }),
+  revokeServiceToken: (id: string) =>
+    requestJson({
+      path: `/api/service-tokens/${id}`,
+      method: "DELETE",
+      schema: ServiceTokenSchema,
+    }),
   createTag: (input: TagInput) =>
     requestJson({
       path: "/api/tags",

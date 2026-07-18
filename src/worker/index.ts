@@ -13,6 +13,10 @@ import {
   LibraryViewSchema,
   LoginInputSchema,
   SessionSchema,
+  ServiceTokenCreatedSchema,
+  ServiceTokenInputSchema,
+  ServiceTokenListSchema,
+  ServiceTokenSchema,
   TagInputSchema,
   TagSchema,
   TagSlugSchema,
@@ -21,8 +25,9 @@ import {
 import type { AssetEvent } from "@/shared/events"
 import { deleteAsset } from "./assets/delete-service"
 import { uploadAsset } from "./assets/service"
-import { authorize, checkPasswordAttempt } from "./auth/authorize"
+import { authorize, authorizeBrowserSession, checkPasswordAttempt } from "./auth/authorize"
 import { createSessionToken, sessionCookieOptions } from "./auth/session"
+import { createServiceTokenMaterial } from "./auth/service-token"
 import { AssetBoxCoordinator } from "./coordinator"
 import {
   createTag,
@@ -33,6 +38,11 @@ import {
   setAssetLifecycle,
   updateTag,
 } from "./data/repository"
+import {
+  insertServiceToken,
+  listServiceTokens,
+  revokeServiceToken,
+} from "./data/service-token-repository"
 import type { Env } from "./env"
 import {
   InternalFailureError,
@@ -131,6 +141,60 @@ app.post("/api/login", async (c) => {
 app.post("/api/logout", (c) => {
   deleteCookie(c, "asset_box_session", { path: "/", secure: true })
   return c.json({ authenticated: false })
+})
+
+app.get("/api/service-tokens", async (c) => {
+  const auth = await authorizeBrowserSession(c)
+  if (auth instanceof Error) return respondError(c, auth)
+
+  const serviceTokens = await listServiceTokens({ db: c.env.ASSET_BOX_DB, now: new Date() })
+  if (serviceTokens instanceof Error) return respondError(c, serviceTokens)
+  return c.json(serviceTokens)
+})
+
+app.post("/api/service-tokens", async (c) => {
+  const auth = await authorizeBrowserSession(c)
+  if (auth instanceof Error) return respondError(c, auth)
+  const input = await parseJsonInput({ read: () => c.req.json(), schema: ServiceTokenInputSchema })
+  if (input instanceof Error) return respondError(c, input)
+
+  const now = new Date()
+  if (input.expiresAt !== undefined && input.expiresAt <= now.toISOString()) {
+    return respondError(
+      c,
+      new InvalidInputError({ reason: "Service token expiration must be in the future" }),
+    )
+  }
+
+  const material = await createServiceTokenMaterial()
+  if (material instanceof Error) return respondError(c, material)
+  const serviceToken = await insertServiceToken({
+    db: c.env.ASSET_BOX_DB,
+    id: crypto.randomUUID(),
+    input,
+    prefix: material.prefix,
+    tokenHash: material.tokenHash,
+    now,
+  })
+  if (serviceToken instanceof Error) return respondError(c, serviceToken)
+  return c.json({ serviceToken, token: material.token }, 201)
+})
+
+app.delete("/api/service-tokens/:id", async (c) => {
+  const auth = await authorizeBrowserSession(c)
+  if (auth instanceof Error) return respondError(c, auth)
+  const id = z.uuid().safeParse(c.req.param("id"))
+  if (!id.success) {
+    return respondError(c, new InvalidInputError({ reason: "Service token id is invalid" }))
+  }
+
+  const serviceToken = await revokeServiceToken({
+    db: c.env.ASSET_BOX_DB,
+    id: id.data,
+    now: new Date(),
+  })
+  if (serviceToken instanceof Error) return respondError(c, serviceToken)
+  return c.json(serviceToken)
 })
 
 app.get("/api/library", async (c) => {
@@ -326,15 +390,17 @@ app.openAPIRegistry.registerComponent("securitySchemes", "sessionCookie", {
   in: "cookie",
   name: "asset_box_session",
 })
-app.openAPIRegistry.registerComponent("securitySchemes", "bearerPassword", {
+app.openAPIRegistry.registerComponent("securitySchemes", "serviceToken", {
   type: "http",
   scheme: "bearer",
-  description: "Use the Asset Box password as the bearer token for agent and CLI access.",
+  description: "Use a service token created in the authenticated web interface.",
 })
 
+const browserSessionSecurity: Record<string, string[]>[] = [{ sessionCookie: [] }]
+
 const protectedSecurity: Record<string, string[]>[] = [
-  { sessionCookie: [] },
-  { bearerPassword: [] },
+  ...browserSessionSecurity,
+  { serviceToken: [] },
 ]
 
 app.openAPIRegistry.registerPath({
@@ -355,6 +421,38 @@ app.openAPIRegistry.registerPath({
   path: "/api/logout",
   tags: ["Authentication"],
   responses: { 200: jsonContent(SessionSchema, "Signed-out session") },
+})
+app.openAPIRegistry.registerPath({
+  method: "get",
+  path: "/api/service-tokens",
+  tags: ["Service tokens"],
+  security: browserSessionSecurity,
+  responses: {
+    ...commonErrorResponses,
+    200: jsonContent(ServiceTokenListSchema, "Service token metadata"),
+  },
+})
+app.openAPIRegistry.registerPath({
+  method: "post",
+  path: "/api/service-tokens",
+  tags: ["Service tokens"],
+  security: browserSessionSecurity,
+  request: { body: { content: { "application/json": { schema: ServiceTokenInputSchema } } } },
+  responses: {
+    ...commonErrorResponses,
+    201: jsonContent(ServiceTokenCreatedSchema, "Created service token and one-time secret"),
+  },
+})
+app.openAPIRegistry.registerPath({
+  method: "delete",
+  path: "/api/service-tokens/{id}",
+  tags: ["Service tokens"],
+  security: browserSessionSecurity,
+  request: { params: z.object({ id: z.uuid() }) },
+  responses: {
+    ...commonErrorResponses,
+    200: jsonContent(ServiceTokenSchema, "Revoked service token"),
+  },
 })
 app.openAPIRegistry.registerPath({
   method: "get",

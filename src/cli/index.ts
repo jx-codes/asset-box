@@ -4,7 +4,7 @@ import * as errore from "errore"
 import fs from "node:fs"
 import path from "node:path"
 import { z } from "zod"
-import { ApiErrorSchema, UploadResponseSchema } from "@/shared/domain"
+import { ApiErrorSchema, ServiceTokenSecretSchema, UploadResponseSchema } from "@/shared/domain"
 
 class CliInputError extends errore.createTaggedError({
   name: "CliInputError",
@@ -28,7 +28,7 @@ const UploadArgumentsSchema = z.object({
   blurb: z.string().trim().min(1).max(280),
   tags: z.array(z.string()).default([]),
   url: z.url(),
-  password: z.string().min(1),
+  serviceToken: ServiceTokenSecretSchema,
 })
 
 type ArgumentState = {
@@ -92,7 +92,7 @@ function parseArgumentTokens(tokens: string[]) {
         .map((tag) => tag.trim())
         .filter(Boolean) ?? [],
     url: state.options.url ?? process.env.ASSET_BOX_URL,
-    password: process.env.ASSET_BOX_PASSWORD,
+    serviceToken: process.env.ASSET_BOX_SERVICE_TOKEN,
   }
   const parsed = UploadArgumentsSchema.safeParse(input)
   if (parsed.success) return parsed.data
@@ -119,7 +119,7 @@ async function upload(args: z.infer<typeof UploadArgumentsSchema>) {
   const endpoint = new URL("/api/assets", args.url)
   const response = await fetch(endpoint, {
     method: "POST",
-    headers: { Authorization: `Bearer ${args.password}` },
+    headers: { Authorization: `Bearer ${args.serviceToken}` },
     body: form,
   }).catch((cause) => new CliRequestError({ message: "Upload request failed", cause }))
   if (response instanceof Error) return response
@@ -144,7 +144,7 @@ async function upload(args: z.infer<typeof UploadArgumentsSchema>) {
 function usage() {
   return [
     "Usage:",
-    "  ASSET_BOX_URL=https://box.example.com ASSET_BOX_PASSWORD=secret \\",
+    "  ASSET_BOX_URL=https://box.example.com ASSET_BOX_SERVICE_TOKEN=abx_... \\",
     '    bun run asset-box upload ./asset.html --title "Title" --blurb "Short description" --tags demo,landing-page',
   ].join("\n")
 }

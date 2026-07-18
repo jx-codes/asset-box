@@ -17,6 +17,8 @@ export type TagManagerState =
   | { tag: "creating" }
   | { tag: "editing"; tagId: string }
 
+export type ServiceTokenManagerState = { tag: "closed" } | { tag: "open" }
+
 export type LiveConnection = { tag: "connecting" } | { tag: "connected" } | { tag: "disconnected" }
 
 export type AssetToast = { tag: "hidden" } | { tag: "new-asset"; asset: Asset }
@@ -28,6 +30,7 @@ export const library$ = observable({
   selection: { tag: "none" } as AssetSelection,
   tagFilter: { tag: "all" } as TagFilter,
   tagManager: { tag: "closed" } as TagManagerState,
+  serviceTokenManager: { tag: "closed" } as ServiceTokenManagerState,
   liveConnection: { tag: "connecting" } as LiveConnection,
   toast: { tag: "hidden" } as AssetToast,
 })

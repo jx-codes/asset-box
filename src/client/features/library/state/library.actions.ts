@@ -71,6 +71,14 @@ export function closeTagManager() {
   library$.tagManager.set({ tag: "closed" })
 }
 
+export function openServiceTokenManager() {
+  library$.serviceTokenManager.set({ tag: "open" })
+}
+
+export function closeServiceTokenManager() {
+  library$.serviceTokenManager.set({ tag: "closed" })
+}
+
 export function clearDeletedAssetSelection(assetId: string) {
   const selection = library$.selection.peek()
   if (selection.tag === "selected" && selection.assetId === assetId) {
