@@ -6,6 +6,7 @@ import {
   clearWorkRequestDraft,
   openAssetWorkRequest,
   openNewAssetRequest,
+  openRequestStatus,
   showLatestNewAssetRequest,
 } from "./work-request.actions"
 import { workRequestPanel$ } from "./work-request.store"
@@ -25,6 +26,12 @@ describe("work request panel actions", () => {
 
     clearWorkRequestDraft()
     expect(workRequestPanel$.state.peek()).toMatchObject({ draftBody: "" })
+  })
+
+  it("opens the durable request status view", () => {
+    openRequestStatus()
+
+    expect(workRequestPanel$.state.peek()).toEqual({ tag: "requests" })
   })
 
   it("moves a new-asset panel from metadata creation to the durable latest request", () => {

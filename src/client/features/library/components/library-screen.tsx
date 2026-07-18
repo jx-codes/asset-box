@@ -9,6 +9,7 @@ import {
   FilePlus2,
   Inbox,
   KeyRound,
+  ListChecks,
   LogOut,
   Plus,
 } from "lucide-react"
@@ -27,7 +28,7 @@ import {
   showArchivedAssets,
 } from "../state/library.actions"
 import { library$ } from "../state/library.store"
-import { openNewAssetRequest } from "../state/work-request.actions"
+import { openNewAssetRequest, openRequestStatus } from "../state/work-request.actions"
 import { filterAssets } from "../utils/filter-assets"
 import { AssetList } from "./asset-list"
 import { AssetPreview } from "./asset-preview"
@@ -114,6 +115,10 @@ export function LibraryScreen() {
           >
             <FilePlus2 />
             <span className="hidden sm:inline">Request asset</span>
+          </Button>
+          <Button variant="ghost" size="sm" onClick={openRequestStatus}>
+            <ListChecks />
+            <span className="hidden sm:inline">Requests</span>
           </Button>
           <Button
             variant="ghost"

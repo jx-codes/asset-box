@@ -21,6 +21,7 @@ import {
   showLatestNewAssetRequest,
 } from "../state/work-request.actions"
 import { workRequestPanel$ } from "../state/work-request.store"
+import { RequestStatusList } from "./request-status-list"
 
 export function WorkRequestPanel() {
   const state = useValue(workRequestPanel$.state)
@@ -38,10 +39,16 @@ export function WorkRequestPanel() {
         <header className="flex h-12 flex-none items-center gap-2 border-b px-3">
           <div className="min-w-0 flex-1">
             <h2 className="truncate text-sm font-semibold">
-              {state.tag === "asset" ? "Asset work request" : "Request a new asset"}
+              {state.tag === "asset"
+                ? "Asset work request"
+                : state.tag === "new-asset"
+                  ? "Request a new asset"
+                  : "Requests"}
             </h2>
             <p className="text-[11px] text-muted-foreground">
-              Drafts stay private until submitted.
+              {state.tag === "requests"
+                ? "Queued, working, and completed requests."
+                : "Drafts stay private until submitted."}
             </p>
           </div>
           <Button
@@ -55,8 +62,10 @@ export function WorkRequestPanel() {
         </header>
         {state.tag === "asset" ? (
           <AssetRequestContent assetId={state.assetId} draftBody={state.draftBody} />
-        ) : (
+        ) : state.tag === "new-asset" ? (
           <NewAssetRequestContent state={state} />
+        ) : (
+          <RequestStatusList />
         )}
       </aside>
     </>

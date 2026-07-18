@@ -4,6 +4,10 @@ export function openAssetWorkRequest(assetId: string) {
   workRequestPanel$.state.set({ tag: "asset", assetId, draftBody: "" })
 }
 
+export function openRequestStatus() {
+  workRequestPanel$.state.set({ tag: "requests" })
+}
+
 export function openNewAssetRequest() {
   workRequestPanel$.state.set({
     tag: "new-asset",

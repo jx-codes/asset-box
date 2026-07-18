@@ -17,5 +17,6 @@ export function newAssetWorkRequestsQueryOptions() {
     queryKey: [...workRequestQueryKey, "new-asset"],
     queryFn: async () => expectApiValue(await api.workRequests({ tag: "new-asset" })),
     staleTime: 10_000,
+    refetchInterval: 15_000,
   })
 }
