@@ -4,9 +4,11 @@ import type { WorkClaim } from "@/shared/work-requests"
 import {
   claimWorkRequest,
   createWorkRequest,
+  failOwnedClaim,
   getClaimContext,
   listAgentWork,
   requireOwnedClaim,
+  resubmitFailedWorkRequest,
   submitAllDraftComments,
 } from "./work-request-repository"
 import { commitWorkResult } from "./work-result-repository"
@@ -55,6 +57,9 @@ describe("work request repository invariants", () => {
       active_claim_principal_id: null,
       active_claim_expires_at: null,
       completed_at: null,
+      pending_failure_claim_id: null,
+      pending_failure_at: null,
+      pending_failure_reason: null,
     }
     const db = {
       prepare: (sql: string) => {
@@ -131,6 +136,7 @@ describe("work request repository invariants", () => {
     expect(result).not.toBeInstanceOf(Error)
     expect(captured[0]?.sql).toContain("rc.submitted_at IS NOT NULL")
     expect(captured[0]?.sql).toContain("rc.resolved_at IS NULL")
+    expect(captured[0]?.sql).toContain("failed_claim.resubmitted_at IS NULL")
     expect(result).toMatchObject({ requests: [{ submittedCommentCount: 1 }] })
   })
 
@@ -145,6 +151,9 @@ describe("work request repository invariants", () => {
       expires_at: "2026-07-18T10:15:00.000Z",
       result_idempotency_key: "eeb34286-1d14-4c13-8c3f-271a7ad94de4",
       completed_at: null,
+      failed_at: null,
+      failure_reason: null,
+      resubmitted_at: null,
     }
     const db = {
       prepare: (sql: string) => {
@@ -175,6 +184,7 @@ describe("work request repository invariants", () => {
     expect(result).not.toBeInstanceOf(Error)
     expect(batchStatements[0]?.sql).toContain("wc.expires_at > ?")
     expect(batchStatements[0]?.sql).toContain("rc.submitted_at IS NOT NULL")
+    expect(batchStatements[0]?.sql).toContain("failed_claim.resubmitted_at IS NULL")
     expect(batchStatements[1]?.sql).toContain("INSERT INTO claim_comments")
     expect(batchStatements[1]?.sql).toContain("rc.resolved_at IS NULL")
     expect(result).toMatchObject({
@@ -194,6 +204,9 @@ describe("work request repository invariants", () => {
       expires_at: "2026-07-18T10:15:00.000Z",
       result_idempotency_key: "eeb34286-1d14-4c13-8c3f-271a7ad94de4",
       completed_at: null,
+      failed_at: null,
+      failure_reason: null,
+      resubmitted_at: null,
     }
     const db = {
       prepare: (sql: string) => {
@@ -263,6 +276,9 @@ describe("work request repository invariants", () => {
             expires_at: "2026-07-18T10:15:00.000Z",
             result_idempotency_key: "eeb34286-1d14-4c13-8c3f-271a7ad94de4",
             completed_at: null,
+            failed_at: null,
+            failure_reason: null,
+            resubmitted_at: null,
           },
         }),
     } as unknown as D1Database
@@ -291,6 +307,9 @@ describe("work request repository invariants", () => {
             expires_at: now.toISOString(),
             result_idempotency_key: "eeb34286-1d14-4c13-8c3f-271a7ad94de4",
             completed_at: null,
+            failed_at: null,
+            failure_reason: null,
+            resubmitted_at: null,
           },
         }),
     } as unknown as D1Database
@@ -306,6 +325,98 @@ describe("work request repository invariants", () => {
     expect(result).toMatchObject({ _tag: "WorkClaimExpiredError" })
   })
 
+  it("reports an owned claim failure without resolving its comment snapshot", async () => {
+    const captured: CapturedStatement[] = []
+    const failedAt = "2026-07-18T10:05:00.000Z"
+    const claimId = "1fd7b329-9c89-4822-abdb-79e93cc2089f"
+    const db = {
+      prepare: (sql: string) =>
+        statement(sql, captured, {
+          first: {
+            id: claimId,
+            request_id: requestId,
+            service_token_id: principalId,
+            claimed_at: now.toISOString(),
+            expires_at: "2026-07-18T10:15:00.000Z",
+            result_idempotency_key: "eeb34286-1d14-4c13-8c3f-271a7ad94de4",
+            completed_at: null,
+            failed_at: failedAt,
+            failure_reason: "Renderer exited with code 1.",
+            resubmitted_at: null,
+          },
+        }),
+    } as unknown as D1Database
+
+    const result = await failOwnedClaim({
+      db,
+      claimId,
+      principalId,
+      reason: "Renderer exited with code 1.",
+      now: new Date(failedAt),
+    })
+
+    expect(result).toMatchObject({
+      claimId,
+      requestId,
+      lifecycle: {
+        tag: "failed",
+        failedAt,
+        reason: "Renderer exited with code 1.",
+      },
+    })
+    expect(captured[0]?.sql).toContain("completed_at IS NULL")
+    expect(captured[0]?.sql).toContain("failed_at IS NULL")
+    expect(captured[0]?.sql).not.toContain("request_comments")
+  })
+
+  it("resubmits the latest failed claim and returns the request to submitted work", async () => {
+    const captured: CapturedStatement[] = []
+    const requestRow = {
+      id: requestId,
+      parent_asset_id: null,
+      title: "New diagram",
+      blurb: "A system overview.",
+      created_at: now.toISOString(),
+      active_claim_id: null,
+      active_claim_principal_id: null,
+      active_claim_expires_at: null,
+      pending_failure_claim_id: null,
+      pending_failure_at: null,
+      pending_failure_reason: null,
+      completed_at: null,
+    }
+    const db = {
+      prepare: (sql: string) => {
+        const results = sql.startsWith("UPDATE work_claims")
+          ? { run: { success: true, meta: { changes: 1 } } as unknown as D1Result }
+          : sql.includes("FROM work_requests wr")
+            ? { first: requestRow }
+            : sql.includes("FROM request_comments")
+              ? {
+                  all: [
+                    {
+                      id: "b809d763-f56f-4a0f-9eb9-fae9d8562f17",
+                      request_id: requestId,
+                      body: "A system overview.",
+                      created_at: now.toISOString(),
+                      submitted_at: now.toISOString(),
+                      resolved_at: null,
+                      resolved_by_asset_id: null,
+                    },
+                  ],
+                }
+              : {}
+        return statement(sql, captured, results)
+      },
+    } as unknown as D1Database
+
+    const result = await resubmitFailedWorkRequest({ db, requestId, now })
+
+    expect(result).toMatchObject({ lifecycle: { tag: "submitted" } })
+    expect(captured[0]?.sql).toContain("SET resubmitted_at = ?")
+    expect(captured[0]?.sql).toContain("failed_at IS NOT NULL")
+  })
+
   it("submits every draft with one atomic update statement", async () => {
     const captured: CapturedStatement[] = []
     const requestRow = {
@@ -318,6 +429,9 @@ describe("work request repository invariants", () => {
       active_claim_principal_id: null,
       active_claim_expires_at: null,
       completed_at: null,
+      pending_failure_claim_id: null,
+      pending_failure_at: null,
+      pending_failure_reason: null,
     }
     const db = {
       prepare: (sql: string) =>
@@ -427,7 +541,9 @@ describe("work request repository invariants", () => {
         resolvedCommentIds: claim.commentIds,
       },
     })
-    expect(batched[0]?.sql).toContain("completed_at IS NULL AND expires_at > ?")
+    expect(batched[0]?.sql).toContain("completed_at IS NULL")
+    expect(batched[0]?.sql).toContain("failed_at IS NULL")
+    expect(batched[0]?.sql).toContain("expires_at > ?")
     expect(batched.some((entry) => entry.sql.includes("INSERT INTO asset_revisions"))).toBe(true)
     expect(batched.some((entry) => entry.sql.includes("INSERT INTO work_results"))).toBe(true)
     const resolution = batched.find((entry) =>

@@ -41,6 +41,11 @@ export class WorkRequestNotFoundError extends errore.createTaggedError({
   message: "Work request $id was not found",
 }) {}
 
+export class WorkRequestStateConflictError extends errore.createTaggedError({
+  name: "WorkRequestStateConflictError",
+  message: "Work request $id $reason",
+}) {}
+
 export class WorkCommentNotFoundError extends errore.createTaggedError({
   name: "WorkCommentNotFoundError",
   message: "Comment $id was not found in work request $requestId",
@@ -64,6 +69,11 @@ export class WorkClaimNotFoundError extends errore.createTaggedError({
 export class WorkClaimExpiredError extends errore.createTaggedError({
   name: "WorkClaimExpiredError",
   message: "Work claim $id expired at $expiresAt",
+}) {}
+
+export class WorkClaimFailedError extends errore.createTaggedError({
+  name: "WorkClaimFailedError",
+  message: "Work claim $id was reported failed at $failedAt",
 }) {}
 
 export class WorkClaimForbiddenError extends errore.createTaggedError({
@@ -168,6 +178,9 @@ export function toErrorResponse(error: Error): ErrorResponse {
   if (WorkRequestNotFoundError.is(error)) {
     return response({ code: "WORK_REQUEST_NOT_FOUND", message: error.message, status: 404 })
   }
+  if (WorkRequestStateConflictError.is(error)) {
+    return response({ code: "WORK_REQUEST_STATE_CONFLICT", message: error.message, status: 409 })
+  }
   if (WorkCommentNotFoundError.is(error)) {
     return response({ code: "WORK_COMMENT_NOT_FOUND", message: error.message, status: 404 })
   }
@@ -182,6 +195,9 @@ export function toErrorResponse(error: Error): ErrorResponse {
   }
   if (WorkClaimExpiredError.is(error)) {
     return response({ code: "WORK_CLAIM_EXPIRED", message: error.message, status: 409 })
+  }
+  if (WorkClaimFailedError.is(error)) {
+    return response({ code: "WORK_CLAIM_FAILED", message: error.message, status: 409 })
   }
   if (WorkClaimForbiddenError.is(error)) {
     return response({ code: "WORK_CLAIM_FORBIDDEN", message: error.message, status: 401 })

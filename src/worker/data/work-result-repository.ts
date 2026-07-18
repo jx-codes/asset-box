@@ -201,7 +201,8 @@ export async function commitWorkResult({
     db
       .prepare(
         `UPDATE work_claims SET completed_at = ?
-         WHERE id = ? AND service_token_id = ? AND completed_at IS NULL AND expires_at > ?`,
+         WHERE id = ? AND service_token_id = ? AND completed_at IS NULL
+           AND failed_at IS NULL AND expires_at > ?`,
       )
       .bind(createdAt, claim.id, principalId, createdAt),
     db

@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
+  WorkClaimFailureInputSchema,
+  WorkClaimFailureSchema,
   WorkCommentSchema,
   WorkPullContextSchema,
   WorkRequestCreateInputSchema,
@@ -56,6 +58,23 @@ describe("work request contracts", () => {
 
     expect(context.source).toEqual({ tag: "none" })
     expect("html" in context.source).toBe(false)
+  })
+
+  it("represents a reported failure as a terminal claim state with a bounded reason", () => {
+    const input = WorkClaimFailureInputSchema.safeParse({ reason: "Renderer exited with code 1." })
+    const failure = WorkClaimFailureSchema.safeParse({
+      claimId: claim.id,
+      requestId: claim.requestId,
+      lifecycle: {
+        tag: "failed",
+        failedAt: "2026-07-18T10:05:00.000Z",
+        reason: "Renderer exited with code 1.",
+      },
+    })
+
+    expect(input.success).toBe(true)
+    expect(failure.success).toBe(true)
+    expect(WorkClaimFailureInputSchema.safeParse({ reason: "   " }).success).toBe(false)
   })
 
   it("requires complete push metadata and a stable idempotency key", () => {

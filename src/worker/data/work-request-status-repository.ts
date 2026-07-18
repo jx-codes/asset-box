@@ -17,6 +17,9 @@ const WorkRequestStatusRowSchema = z.object({
   active_claim_id: WorkClaimIdSchema.nullable(),
   active_claim_principal_id: z.uuid().nullable(),
   active_claim_expires_at: z.string().nullable(),
+  pending_failure_claim_id: WorkClaimIdSchema.nullable(),
+  pending_failure_at: z.string().nullable(),
+  pending_failure_reason: z.string().nullable(),
   completed_at: z.string().nullable(),
   has_submitted_unresolved: z.union([z.literal(0), z.literal(1)]),
   latest_comment_body: z.string().nullable(),
@@ -46,6 +49,25 @@ function toLifecycle(
   ) {
     return new DatabaseFailureError({ operation: "work request status claim parsing" })
   }
+  if (
+    row.pending_failure_claim_id !== null &&
+    row.pending_failure_at !== null &&
+    row.pending_failure_reason !== null
+  ) {
+    return {
+      tag: "failed",
+      claimId: row.pending_failure_claim_id,
+      failedAt: row.pending_failure_at,
+      reason: row.pending_failure_reason,
+    }
+  }
+  if (
+    row.pending_failure_claim_id !== null ||
+    row.pending_failure_at !== null ||
+    row.pending_failure_reason !== null
+  ) {
+    return new DatabaseFailureError({ operation: "work request status failure parsing" })
+  }
   if (row.has_submitted_unresolved === 1) return { tag: "submitted" }
   if (row.completed_at !== null) return { tag: "completed", completedAt: row.completed_at }
   return { tag: "draft" }
@@ -63,6 +85,9 @@ export async function listWorkRequestStatuses({ db, now }: { db: D1Database; now
         active_claim.id AS active_claim_id,
         active_claim.service_token_id AS active_claim_principal_id,
         active_claim.expires_at AS active_claim_expires_at,
+        pending_failure.id AS pending_failure_claim_id,
+        pending_failure.failed_at AS pending_failure_at,
+        pending_failure.failure_reason AS pending_failure_reason,
         (SELECT MAX(rc.resolved_at) FROM request_comments rc WHERE rc.request_id = wr.id) AS completed_at,
         EXISTS (
           SELECT 1 FROM request_comments rc
@@ -77,8 +102,14 @@ export async function listWorkRequestStatuses({ db, now }: { db: D1Database; now
       FROM work_requests wr
       LEFT JOIN work_claims active_claim ON active_claim.id = (
         SELECT wc.id FROM work_claims wc
-        WHERE wc.request_id = wr.id AND wc.completed_at IS NULL AND wc.expires_at > ?
+        WHERE wc.request_id = wr.id AND wc.completed_at IS NULL AND wc.failed_at IS NULL
+          AND wc.expires_at > ?
         ORDER BY wc.claimed_at DESC LIMIT 1
+      )
+      LEFT JOIN work_claims pending_failure ON pending_failure.id = (
+        SELECT wc.id FROM work_claims wc
+        WHERE wc.request_id = wr.id AND wc.failed_at IS NOT NULL AND wc.resubmitted_at IS NULL
+        ORDER BY wc.failed_at DESC, wc.id DESC LIMIT 1
       )
       ORDER BY wr.created_at DESC, wr.id`,
     )

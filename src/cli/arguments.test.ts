@@ -56,6 +56,21 @@ describe("Asset Box CLI arguments", () => {
     })
   })
 
+  it("parses an explicit failure report for a pulled workspace", () => {
+    const result = parseArgumentTokens(
+      ["fail", "./work", "--reason", "Renderer exited with code 1."],
+      env,
+    )
+
+    expect(result).toEqual({
+      command: "fail",
+      directory: "./work",
+      reason: "Renderer exited with code 1.",
+      url: env.ASSET_BOX_URL,
+      serviceToken: env.ASSET_BOX_SERVICE_TOKEN,
+    })
+  })
+
   it("rejects missing and malformed credentials before requests", () => {
     expect(parseArgumentTokens(["pull"], { ASSET_BOX_URL: env.ASSET_BOX_URL })).toBeInstanceOf(
       Error,

@@ -1,9 +1,10 @@
-import { useQuery } from "@tanstack/react-query"
-import { CheckCircle2, CircleDashed, Clock3, LoaderCircle } from "lucide-react"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { CheckCircle2, CircleDashed, Clock3, LoaderCircle, TriangleAlert } from "lucide-react"
+import { api, expectApiValue } from "@/client/lib/api"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import type { WorkRequestStatusSummary } from "@/shared/work-requests"
-import { workRequestStatusQueryOptions } from "../api/work-request.queries"
+import { workRequestQueryKey, workRequestStatusQueryOptions } from "../api/work-request.queries"
 
 const dateTimeFormatter = new Intl.DateTimeFormat(undefined, {
   dateStyle: "medium",
@@ -72,6 +73,12 @@ function RequestLifecycleBadge({ request }: { request: WorkRequestStatusSummary 
           <LoaderCircle /> Working
         </Badge>
       )
+    case "failed":
+      return (
+        <Badge variant="destructive">
+          <TriangleAlert /> Failed
+        </Badge>
+      )
     case "completed":
       return (
         <Badge variant="secondary">
@@ -90,6 +97,8 @@ function RequestLifecycleDetail({ request }: { request: WorkRequestStatusSummary
       return "Waiting for a worker to claim it."
     case "claimed":
       return `Worker lease ends ${formatDateTime(lifecycle.expiresAt)}.`
+    case "failed":
+      return `Failed ${formatDateTime(lifecycle.failedAt)}: ${lifecycle.reason}`
     case "completed":
       return `Completed ${formatDateTime(lifecycle.completedAt)}.`
   }
@@ -102,6 +111,13 @@ function RequestStatusItem({
   request: WorkRequestStatusSummary
   showTargetTitle: boolean
 }) {
+  const queryClient = useQueryClient()
+  const resubmit = useMutation({
+    mutationFn: async () => expectApiValue(await api.resubmitWorkRequest(request.requestId)),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: workRequestQueryKey })
+    },
+  })
   const instruction =
     request.latestCommentBody ??
     (request.target.tag === "new-asset" ? request.target.blurb : "No instructions added.")
@@ -127,6 +143,23 @@ function RequestStatusItem({
       <time className="mt-1 block text-[11px] text-muted-foreground" dateTime={request.createdAt}>
         Requested {formatDateTime(request.createdAt)}
       </time>
+      {request.lifecycle.tag === "failed" ? (
+        <div className="mt-2 flex items-center gap-2">
+          <Button
+            size="xs"
+            variant="outline"
+            disabled={resubmit.isPending}
+            onClick={() => resubmit.mutate()}
+          >
+            {resubmit.isPending ? "Resubmitting…" : "Resubmit"}
+          </Button>
+          {resubmit.isError ? (
+            <span className="text-xs text-destructive" role="alert">
+              {resubmit.error.message}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
     </li>
   )
 }

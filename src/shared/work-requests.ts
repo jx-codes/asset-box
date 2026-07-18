@@ -56,6 +56,30 @@ export const WorkRequestTargetSchema = z
   ])
   .openapi("WorkRequestTarget")
 
+export const WorkClaimFailureReasonSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(4000)
+  .openapi("WorkClaimFailureReason")
+
+export const FailedWorkClaimLifecycleSchema = z
+  .object({
+    tag: z.literal("failed"),
+    failedAt: z.string().datetime(),
+    reason: WorkClaimFailureReasonSchema,
+  })
+  .openapi("FailedWorkClaimLifecycle")
+
+export const WorkRequestFailedLifecycleSchema = z
+  .object({
+    tag: z.literal("failed"),
+    claimId: WorkClaimIdSchema,
+    failedAt: z.string().datetime(),
+    reason: WorkClaimFailureReasonSchema,
+  })
+  .openapi("WorkRequestFailedLifecycle")
+
 export const WorkRequestLifecycleSchema = z
   .discriminatedUnion("tag", [
     z.object({ tag: z.literal("draft") }),
@@ -66,6 +90,7 @@ export const WorkRequestLifecycleSchema = z
       claimedByPrincipalId: z.string().uuid(),
       expiresAt: z.string().datetime(),
     }),
+    WorkRequestFailedLifecycleSchema,
     z.object({ tag: z.literal("completed"), completedAt: z.string().datetime() }),
   ])
   .openapi("WorkRequestLifecycle")
@@ -95,6 +120,10 @@ export const WorkClaimInputSchema = z
   .object({ leaseSeconds: z.number().int().min(60).max(3600).default(900) })
   .openapi("WorkClaimInput")
 
+export const WorkClaimFailureInputSchema = z
+  .object({ reason: WorkClaimFailureReasonSchema })
+  .openapi("WorkClaimFailureInput")
+
 export const ActiveWorkClaimLifecycleSchema = z
   .object({ tag: z.literal("active"), expiresAt: z.string().datetime() })
   .openapi("ActiveWorkClaimLifecycle")
@@ -103,6 +132,7 @@ export const WorkClaimLifecycleSchema = z
   .discriminatedUnion("tag", [
     ActiveWorkClaimLifecycleSchema,
     z.object({ tag: z.literal("expired"), expiredAt: z.string().datetime() }),
+    FailedWorkClaimLifecycleSchema,
     z.object({
       tag: z.literal("completed"),
       completedAt: z.string().datetime(),
@@ -122,6 +152,14 @@ export const WorkClaimSchema = z
     commentIds: z.array(WorkCommentIdSchema).min(1),
   })
   .openapi("WorkClaim")
+
+export const WorkClaimFailureSchema = z
+  .object({
+    claimId: WorkClaimIdSchema,
+    requestId: WorkRequestIdSchema,
+    lifecycle: FailedWorkClaimLifecycleSchema,
+  })
+  .openapi("WorkClaimFailure")
 
 export const SubmittedWorkCommentSchema = z
   .object({
@@ -238,6 +276,8 @@ export const WorkResultSchema = z
 export type AgentWorkList = z.infer<typeof AgentWorkListSchema>
 export type AgentWorkSummary = z.infer<typeof AgentWorkSummarySchema>
 export type WorkClaim = z.infer<typeof WorkClaimSchema>
+export type WorkClaimFailure = z.infer<typeof WorkClaimFailureSchema>
+export type WorkClaimFailureInput = z.infer<typeof WorkClaimFailureInputSchema>
 export type WorkClaimLifecycle = z.infer<typeof WorkClaimLifecycleSchema>
 export type WorkClaimInput = z.infer<typeof WorkClaimInputSchema>
 export type WorkComment = z.infer<typeof WorkCommentSchema>

@@ -3,6 +3,7 @@ import { z } from "zod"
 import {
   AgentWorkListSchema,
   type AgentWorkSummary,
+  WorkClaimFailureSchema,
   WorkClaimSchema,
   type WorkClaim,
   WorkCommentSchema,
@@ -17,11 +18,13 @@ import {
   DatabaseFailureError,
   WorkAlreadyClaimedError,
   WorkClaimExpiredError,
+  WorkClaimFailedError,
   WorkClaimForbiddenError,
   WorkClaimNotFoundError,
   WorkCommentNotFoundError,
   WorkNotSubmittedError,
   WorkRequestNotFoundError,
+  WorkRequestStateConflictError,
   WorkResultConflictError,
 } from "../errors"
 import { requireAsset } from "./repository"
@@ -36,6 +39,9 @@ const WorkRequestRowSchema = z.object({
   active_claim_principal_id: z.string().nullable(),
   active_claim_expires_at: z.string().nullable(),
   completed_at: z.string().nullable(),
+  pending_failure_claim_id: z.string().nullable(),
+  pending_failure_at: z.string().nullable(),
+  pending_failure_reason: z.string().nullable(),
 })
 
 const WorkCommentRowSchema = z.object({
@@ -66,6 +72,9 @@ const ClaimRowSchema = z.object({
   expires_at: z.string(),
   result_idempotency_key: z.string(),
   completed_at: z.string().nullable(),
+  failed_at: z.string().nullable(),
+  failure_reason: z.string().nullable(),
+  resubmitted_at: z.string().nullable(),
 })
 
 const ClaimCommentRowSchema = z.object({ comment_id: z.string() })
@@ -157,7 +166,9 @@ function toComment(row: z.infer<typeof WorkCommentRowSchema>): WorkComment {
   })
 }
 
-function toRequestLifecycle(row: z.infer<typeof WorkRequestRowSchema>): WorkRequest["lifecycle"] {
+function toRequestLifecycle(
+  row: z.infer<typeof WorkRequestRowSchema>,
+): DatabaseFailureError | WorkRequest["lifecycle"] {
   if (
     row.active_claim_id !== null &&
     row.active_claim_principal_id !== null &&
@@ -169,6 +180,32 @@ function toRequestLifecycle(row: z.infer<typeof WorkRequestRowSchema>): WorkRequ
       claimedByPrincipalId: row.active_claim_principal_id,
       expiresAt: row.active_claim_expires_at,
     }
+  }
+  if (
+    row.active_claim_id !== null ||
+    row.active_claim_principal_id !== null ||
+    row.active_claim_expires_at !== null
+  ) {
+    return new DatabaseFailureError({ operation: "work request active claim parsing" })
+  }
+  if (
+    row.pending_failure_claim_id !== null &&
+    row.pending_failure_at !== null &&
+    row.pending_failure_reason !== null
+  ) {
+    return {
+      tag: "failed",
+      claimId: row.pending_failure_claim_id,
+      failedAt: row.pending_failure_at,
+      reason: row.pending_failure_reason,
+    }
+  }
+  if (
+    row.pending_failure_claim_id !== null ||
+    row.pending_failure_at !== null ||
+    row.pending_failure_reason !== null
+  ) {
+    return new DatabaseFailureError({ operation: "work request failure parsing" })
   }
   if (row.completed_at !== null) return { tag: "completed", completedAt: row.completed_at }
   return { tag: "draft" }
@@ -195,12 +232,14 @@ async function loadRequest({
 
   const lifecycle = (() => {
     const base = toRequestLifecycle(row)
-    if (base.tag === "claimed") return base
+    if (base instanceof Error) return base
+    if (base.tag === "claimed" || base.tag === "failed") return base
     if (comments.some((comment) => comment.submitted_at !== null && comment.resolved_at === null)) {
       return { tag: "submitted" as const }
     }
     return base
   })()
+  if (lifecycle instanceof Error) return lifecycle
 
   const target = await (async () => {
     if (row.parent_asset_id === null) {
@@ -231,12 +270,21 @@ function requestSelectSql(whereClause: string) {
     active_claim.id AS active_claim_id,
     active_claim.service_token_id AS active_claim_principal_id,
     active_claim.expires_at AS active_claim_expires_at,
+    pending_failure.id AS pending_failure_claim_id,
+    pending_failure.failed_at AS pending_failure_at,
+    pending_failure.failure_reason AS pending_failure_reason,
     (SELECT MAX(rc.resolved_at) FROM request_comments rc WHERE rc.request_id = wr.id) AS completed_at
   FROM work_requests wr
   LEFT JOIN work_claims active_claim ON active_claim.id = (
     SELECT wc.id FROM work_claims wc
-    WHERE wc.request_id = wr.id AND wc.completed_at IS NULL AND wc.expires_at > ?
+    WHERE wc.request_id = wr.id AND wc.completed_at IS NULL AND wc.failed_at IS NULL
+      AND wc.expires_at > ?
     ORDER BY wc.claimed_at DESC LIMIT 1
+  )
+  LEFT JOIN work_claims pending_failure ON pending_failure.id = (
+    SELECT wc.id FROM work_claims wc
+    WHERE wc.request_id = wr.id AND wc.failed_at IS NOT NULL AND wc.resubmitted_at IS NULL
+    ORDER BY wc.failed_at DESC, wc.id DESC LIMIT 1
   )
   WHERE ${whereClause}
   ORDER BY wr.created_at DESC`
@@ -455,8 +503,14 @@ export async function listAgentWork({ db, now }: { db: D1Database; now: Date }) 
           ON rc.request_id = wr.id AND rc.submitted_at IS NOT NULL AND rc.resolved_at IS NULL
         LEFT JOIN work_claims active_claim ON active_claim.id = (
           SELECT wc.id FROM work_claims wc
-          WHERE wc.request_id = wr.id AND wc.completed_at IS NULL AND wc.expires_at > ?
+          WHERE wc.request_id = wr.id AND wc.completed_at IS NULL AND wc.failed_at IS NULL
+            AND wc.expires_at > ?
           ORDER BY wc.claimed_at DESC LIMIT 1
+        )
+        WHERE NOT EXISTS (
+          SELECT 1 FROM work_claims failed_claim
+          WHERE failed_claim.request_id = wr.id AND failed_claim.failed_at IS NOT NULL
+            AND failed_claim.resubmitted_at IS NULL
         )
         GROUP BY wr.id, wr.parent_asset_id, wr.title, wr.blurb, active_claim.expires_at
         ORDER BY oldest_submitted_at, wr.id`,
@@ -493,7 +547,7 @@ async function findClaim({ db, id }: { db: D1Database; id: string }) {
     statement: db
       .prepare(
         `SELECT id, request_id, service_token_id, claimed_at, expires_at,
-          result_idempotency_key, completed_at
+          result_idempotency_key, completed_at, failed_at, failure_reason, resubmitted_at
          FROM work_claims WHERE id = ?`,
       )
       .bind(id),
@@ -564,7 +618,13 @@ export async function claimWorkRequest({
              )
              AND NOT EXISTS (
                SELECT 1 FROM work_claims wc
-               WHERE wc.request_id = wr.id AND wc.completed_at IS NULL AND wc.expires_at > ?
+               WHERE wc.request_id = wr.id AND wc.completed_at IS NULL AND wc.failed_at IS NULL
+                 AND wc.expires_at > ?
+             )
+             AND NOT EXISTS (
+               SELECT 1 FROM work_claims failed_claim
+               WHERE failed_claim.request_id = wr.id AND failed_claim.failed_at IS NOT NULL
+                 AND failed_claim.resubmitted_at IS NULL
              )`,
         )
         .bind(id, principalId, claimedAt, expiresAt, idempotencyKey, requestId, claimedAt),
@@ -586,6 +646,12 @@ export async function claimWorkRequest({
     const request = await requireWorkRequest({ db, id: requestId, now })
     if (request instanceof Error) return request
     if (request.lifecycle.tag === "claimed") return new WorkAlreadyClaimedError({ id: requestId })
+    if (request.lifecycle.tag === "failed") {
+      return new WorkRequestStateConflictError({
+        id: requestId,
+        reason: "must be resubmitted after its reported failure",
+      })
+    }
     return new WorkNotSubmittedError({ id: requestId })
   }
 
@@ -595,6 +661,108 @@ export async function claimWorkRequest({
   const commentIds = await claimCommentIds({ db, claimId: id })
   if (commentIds instanceof Error) return commentIds
   return toClaim({ row: row.value, commentIds })
+}
+
+function toClaimFailure(row: z.infer<typeof ClaimRowSchema>) {
+  if (row.failed_at === null || row.failure_reason === null) {
+    return new DatabaseFailureError({ operation: "work claim failure parsing" })
+  }
+
+  return errore.try({
+    try: () =>
+      WorkClaimFailureSchema.parse({
+        claimId: row.id,
+        requestId: row.request_id,
+        lifecycle: { tag: "failed", failedAt: row.failed_at, reason: row.failure_reason },
+      }),
+    catch: (cause) => new DatabaseFailureError({ operation: "work claim failure parsing", cause }),
+  })
+}
+
+export async function failOwnedClaim({
+  db,
+  claimId,
+  principalId,
+  reason,
+  now,
+}: {
+  db: D1Database
+  claimId: string
+  principalId: string
+  reason: string
+  now: Date
+}) {
+  const failedAt = now.toISOString()
+  const updated = await readFirst({
+    statement: db
+      .prepare(
+        `UPDATE work_claims SET failed_at = ?, failure_reason = ?
+         WHERE id = ? AND service_token_id = ? AND completed_at IS NULL
+           AND failed_at IS NULL AND expires_at > ?
+         RETURNING id, request_id, service_token_id, claimed_at, expires_at,
+           result_idempotency_key, completed_at, failed_at, failure_reason, resubmitted_at`,
+      )
+      .bind(failedAt, reason, claimId, principalId, failedAt),
+    schema: ClaimRowSchema,
+    operation: "work claim failure report",
+  })
+  if (updated instanceof Error) return updated
+  if (updated.tag === "found") return toClaimFailure(updated.value)
+
+  const existing = await findClaim({ db, id: claimId })
+  if (existing instanceof Error) return existing
+  if (existing.tag === "missing") return new WorkClaimNotFoundError({ id: claimId })
+  if (existing.value.service_token_id !== principalId) {
+    return new WorkClaimForbiddenError({ id: claimId })
+  }
+  if (existing.value.failed_at !== null || existing.value.failure_reason !== null) {
+    return toClaimFailure(existing.value)
+  }
+  if (existing.value.completed_at !== null) {
+    return new WorkResultConflictError({ reason: `Work claim ${claimId} already has a result` })
+  }
+  if (existing.value.expires_at <= failedAt) {
+    return new WorkClaimExpiredError({ id: claimId, expiresAt: existing.value.expires_at })
+  }
+  return new DatabaseFailureError({ operation: "work claim failure transition" })
+}
+
+export async function resubmitFailedWorkRequest({
+  db,
+  requestId,
+  now,
+}: {
+  db: D1Database
+  requestId: string
+  now: Date
+}) {
+  const resubmittedAt = now.toISOString()
+  const result = await db
+    .prepare(
+      `UPDATE work_claims SET resubmitted_at = ?
+       WHERE id = (
+         SELECT id FROM work_claims
+         WHERE request_id = ? AND failed_at IS NOT NULL AND resubmitted_at IS NULL
+         ORDER BY failed_at DESC, id DESC LIMIT 1
+       ) AND request_id = ? AND completed_at IS NULL
+         AND failed_at IS NOT NULL AND resubmitted_at IS NULL`,
+    )
+    .bind(resubmittedAt, requestId, requestId)
+    .run()
+    .catch((cause) => new DatabaseFailureError({ operation: "work request resubmission", cause }))
+  if (result instanceof Error) return result
+  if (!result.success) return new DatabaseFailureError({ operation: "work request resubmission" })
+  if ((result.meta.changes ?? 0) > 0) return requireWorkRequest({ db, id: requestId, now })
+
+  const request = await requireWorkRequest({ db, id: requestId, now })
+  if (request instanceof Error) return request
+  if (request.lifecycle.tag === "failed") {
+    return new DatabaseFailureError({ operation: "work request resubmission transition" })
+  }
+  return new WorkRequestStateConflictError({
+    id: requestId,
+    reason: "is not awaiting resubmission",
+  })
 }
 
 export async function requireOwnedClaim({
@@ -615,6 +783,12 @@ export async function requireOwnedClaim({
   if (row.tag === "missing") return new WorkClaimNotFoundError({ id: claimId })
   if (row.value.service_token_id !== principalId) {
     return new WorkClaimForbiddenError({ id: claimId })
+  }
+  if (row.value.failed_at !== null || row.value.failure_reason !== null) {
+    if (row.value.failed_at !== null && row.value.failure_reason !== null) {
+      return new WorkClaimFailedError({ id: claimId, failedAt: row.value.failed_at })
+    }
+    return new DatabaseFailureError({ operation: "work claim failure parsing" })
   }
   if (!allowCompleted && row.value.completed_at !== null) {
     return new WorkResultConflictError({ reason: `Work claim ${claimId} already has a result` })

@@ -135,6 +135,12 @@ export const api = {
       method: "POST",
       schema: WorkRequestSchema,
     }),
+  resubmitWorkRequest: (requestId: string) =>
+    requestJson({
+      path: `/api/work-requests/${requestId}/resubmit`,
+      method: "POST",
+      schema: WorkRequestSchema,
+    }),
   serviceTokens: () => requestJson({ path: "/api/service-tokens", schema: ServiceTokenListSchema }),
   createServiceToken: (input: ServiceTokenInput) =>
     requestJson({

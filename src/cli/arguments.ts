@@ -37,15 +37,31 @@ export const PushArgumentsSchema = ConnectionSchema.extend({
   tags: z.array(z.string()),
 })
 
+export const FailArgumentsSchema = ConnectionSchema.extend({
+  command: z.literal("fail"),
+  directory: z.string().min(1),
+  reason: z.string().trim().min(1).max(4000),
+})
+
 export const CliArgumentsSchema = z.discriminatedUnion("command", [
   UploadArgumentsSchema,
   PullArgumentsSchema,
   PushArgumentsSchema,
+  FailArgumentsSchema,
 ])
 
 export type CliArguments = z.infer<typeof CliArgumentsSchema>
 
-const allowedOptions = new Set(["title", "blurb", "tags", "url", "out", "lease-seconds", "html"])
+const allowedOptions = new Set([
+  "title",
+  "blurb",
+  "tags",
+  "url",
+  "out",
+  "lease-seconds",
+  "html",
+  "reason",
+])
 
 type ArgumentState = {
   positionals: string[]
@@ -142,6 +158,14 @@ export function parseArgumentTokens(
         ...connection,
       }
     }
+    if (command === "fail") {
+      return {
+        command,
+        directory: first ?? "asset-box-work",
+        reason: state.options.reason,
+        ...connection,
+      }
+    }
     return { command, ...connection }
   })()
 
@@ -157,5 +181,6 @@ export function usage() {
     '    bun run asset-box upload ./asset.html --title "Title" --blurb "Description" --tags demo',
     "  bun run asset-box pull [request-id] --out ./asset-box-work --lease-seconds 900",
     '  bun run asset-box push ./asset-box-work --html result.html --title "Result" --blurb "Description" --tags demo',
+    '  bun run asset-box fail ./asset-box-work --reason "Failure details"',
   ].join("\n")
 }

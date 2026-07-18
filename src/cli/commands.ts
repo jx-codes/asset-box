@@ -7,11 +7,18 @@ import {
   AgentWorkListSchema,
   AgentWorkTargetSchema,
   WorkClaimSchema,
+  WorkClaimFailureInputSchema,
+  WorkClaimFailureSchema,
   WorkPullContextSchema,
   WorkResultPushInputSchema,
   WorkResultSchema,
 } from "@/shared/work-requests"
-import type { PullArgumentsSchema, PushArgumentsSchema, UploadArgumentsSchema } from "./arguments"
+import type {
+  FailArgumentsSchema,
+  PullArgumentsSchema,
+  PushArgumentsSchema,
+  UploadArgumentsSchema,
+} from "./arguments"
 
 export class CliFileError extends errore.createTaggedError({
   name: "CliFileError",
@@ -42,6 +49,7 @@ const PullManifestSchema = z.object({
 type UploadArguments = z.infer<typeof UploadArgumentsSchema>
 type PullArguments = z.infer<typeof PullArgumentsSchema>
 type PushArguments = z.infer<typeof PushArgumentsSchema>
+type FailArguments = z.infer<typeof FailArgumentsSchema>
 
 function authorization(serviceToken: string) {
   return { Authorization: `Bearer ${serviceToken}` }
@@ -205,8 +213,8 @@ export async function pullWorkRequest(args: PullArguments) {
   return { directory, manifest }
 }
 
-export async function pushWorkRequestResult(args: PushArguments) {
-  const directory = path.resolve(args.directory)
+async function readPullManifest(directoryInput: string) {
+  const directory = path.resolve(directoryInput)
   const manifestFile = path.join(directory, "request.json")
   const rawManifest = await fs.promises
     .readFile(manifestFile, "utf8")
@@ -217,6 +225,13 @@ export async function pushWorkRequestResult(args: PushArguments) {
     catch: (cause) => new CliFileError({ operation: "parse", file: manifestFile, cause }),
   })
   if (manifest instanceof Error) return manifest
+  return { directory, manifestFile, manifest }
+}
+
+export async function pushWorkRequestResult(args: PushArguments) {
+  const workspace = await readPullManifest(args.directory)
+  if (workspace instanceof Error) return workspace
+  const { directory, manifestFile, manifest } = workspace
 
   const htmlFile = path.resolve(directory, args.html)
   const html = await fs.promises
@@ -243,5 +258,21 @@ export async function pushWorkRequestResult(args: PushArguments) {
     schema: WorkResultSchema,
     method: "POST",
     body: input.data,
+  })
+}
+
+export async function failWorkRequest(args: FailArguments) {
+  const workspace = await readPullManifest(args.directory)
+  if (workspace instanceof Error) return workspace
+
+  const input = WorkClaimFailureInputSchema.parse({ reason: args.reason })
+  return requestJson({
+    url: args.url || workspace.manifest.serviceUrl,
+    serviceToken: args.serviceToken,
+    pathName: `/api/agent/claims/${workspace.manifest.claim.id}/failure`,
+    operation: "Failure report",
+    schema: WorkClaimFailureSchema,
+    method: "POST",
+    body: input,
   })
 }

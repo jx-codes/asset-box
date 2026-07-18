@@ -1,7 +1,12 @@
 #!/usr/bin/env bun
 
 import { parseArgumentTokens, usage, type CliArguments } from "./arguments"
-import { pullWorkRequest, pushWorkRequestResult, uploadAssetFile } from "./commands"
+import {
+  failWorkRequest,
+  pullWorkRequest,
+  pushWorkRequestResult,
+  uploadAssetFile,
+} from "./commands"
 
 async function run(args: CliArguments) {
   if (args.command === "upload") {
@@ -20,6 +25,16 @@ async function run(args: CliArguments) {
     console.log(`Pulled request ${result.manifest.claim.requestId}`)
     console.log(`Claim expires: ${result.manifest.claim.lifecycle.expiresAt}`)
     console.log(`Workspace: ${result.directory}`)
+    return { tag: "completed" as const }
+  }
+
+  if (args.command === "fail") {
+    const result = await failWorkRequest(args)
+    if (result instanceof Error) return result
+    console.log(`Reported failure for request ${result.requestId}`)
+    console.log(
+      "The lease is released. The request must be resubmitted before it can be claimed again.",
+    )
     return { tag: "completed" as const }
   }
 

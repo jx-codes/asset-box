@@ -5,6 +5,8 @@ import {
   WorkClaimIdSchema,
   WorkClaimInputSchema,
   WorkClaimSchema,
+  WorkClaimFailureInputSchema,
+  WorkClaimFailureSchema,
   WorkCommentIdSchema,
   WorkCommentInputSchema,
   WorkCommentSchema,
@@ -22,9 +24,11 @@ import {
   addDraftComment,
   claimWorkRequest,
   createWorkRequest,
+  failOwnedClaim,
   listAgentWork,
   listWorkRequests,
   requireWorkRequest,
+  resubmitFailedWorkRequest,
   submitAllDraftComments,
   submitComment,
 } from "../data/work-request-repository"
@@ -184,6 +188,27 @@ export function registerWorkRequestRoutes(app: OpenAPIHono<AppContext>) {
     return c.json(request)
   })
 
+  app.post("/api/work-requests/:id/resubmit", async (c) => {
+    const auth = await authorizeBrowserSession(c)
+    if (auth instanceof Error) return respondError(c, auth)
+    const requestId = WorkRequestIdSchema.safeParse(c.req.param("id"))
+    if (!requestId.success) {
+      return respondError(c, new InvalidInputError({ reason: "Request id is invalid" }))
+    }
+
+    const request = await resubmitFailedWorkRequest({
+      db: c.env.ASSET_BOX_DB,
+      requestId: requestId.data,
+      now: new Date(),
+    })
+    if (request instanceof Error) return respondError(c, request)
+    await notifyClients({
+      c,
+      event: { tag: "work-request-changed", requestId: requestId.data },
+    })
+    return c.json(request)
+  })
+
   app.get("/api/agent/work-requests", async (c) => {
     const principal = await authorizeServiceTokenPrincipal(c)
     if (principal instanceof Error) return respondError(c, principal)
@@ -234,6 +259,34 @@ export function registerWorkRequestRoutes(app: OpenAPIHono<AppContext>) {
     })
     if (context instanceof Error) return respondError(c, context)
     return c.json(context)
+  })
+
+  app.post("/api/agent/claims/:id/failure", async (c) => {
+    const principal = await authorizeServiceTokenPrincipal(c)
+    if (principal instanceof Error) return respondError(c, principal)
+    const claimId = WorkClaimIdSchema.safeParse(c.req.param("id"))
+    if (!claimId.success) {
+      return respondError(c, new InvalidInputError({ reason: "Claim id is invalid" }))
+    }
+    const input = await parseJsonInput({
+      read: () => c.req.json(),
+      schema: WorkClaimFailureInputSchema,
+    })
+    if (input instanceof Error) return respondError(c, input)
+
+    const failure = await failOwnedClaim({
+      db: c.env.ASSET_BOX_DB,
+      claimId: claimId.data,
+      principalId: principal.tokenId,
+      reason: input.reason,
+      now: new Date(),
+    })
+    if (failure instanceof Error) return respondError(c, failure)
+    await notifyClients({
+      c,
+      event: { tag: "work-request-changed", requestId: failure.requestId },
+    })
+    return c.json(failure)
   })
 
   app.post("/api/agent/claims/:id/result", async (c) => {
@@ -348,6 +401,17 @@ export function registerWorkRequestRoutes(app: OpenAPIHono<AppContext>) {
     },
   })
   app.openAPIRegistry.registerPath({
+    method: "post",
+    path: "/api/work-requests/{id}/resubmit",
+    tags: ["Work requests"],
+    security: browserSessionSecurity,
+    request: { params: z.object({ id: WorkRequestIdSchema }) },
+    responses: {
+      ...commonErrorResponses,
+      200: jsonContent(WorkRequestSchema, "Resubmitted failed work request"),
+    },
+  })
+  app.openAPIRegistry.registerPath({
     method: "get",
     path: "/api/agent/work-requests",
     tags: ["Agent work"],
@@ -377,6 +441,20 @@ export function registerWorkRequestRoutes(app: OpenAPIHono<AppContext>) {
     responses: {
       ...commonErrorResponses,
       200: jsonContent(WorkPullContextSchema, "Claim context and optional source HTML"),
+    },
+  })
+  app.openAPIRegistry.registerPath({
+    method: "post",
+    path: "/api/agent/claims/{id}/failure",
+    tags: ["Agent work"],
+    security: serviceTokenSecurity,
+    request: {
+      params: z.object({ id: WorkClaimIdSchema }),
+      body: { content: { "application/json": { schema: WorkClaimFailureInputSchema } } },
+    },
+    responses: {
+      ...commonErrorResponses,
+      200: jsonContent(WorkClaimFailureSchema, "Reported claim failure and released lease"),
     },
   })
   app.openAPIRegistry.registerPath({
