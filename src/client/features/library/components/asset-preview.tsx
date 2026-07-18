@@ -37,7 +37,7 @@ export function AssetPreview({ asset, tags }: { asset: Asset | undefined; tags: 
         </div>
         <AssetActions asset={asset} tags={tags} />
         <Button variant="outline" size="sm" asChild>
-          <a href={`/assets/${asset.id}`} target="_blank" rel="noreferrer">
+          <a href={`/view/${asset.id}`} target="_blank" rel="noreferrer">
             <ExternalLink className="size-3.5" />
             <span className="hidden sm:inline">Open</span>
           </a>
@@ -47,7 +47,7 @@ export function AssetPreview({ asset, tags }: { asset: Asset | undefined; tags: 
       <div className="flex min-h-0 flex-1 flex-col p-2 md:p-3">
         <iframe
           className="min-h-0 flex-1 bg-white shadow-sm ring-1 ring-black/10"
-          src={`/assets/${asset.id}`}
+          src={`/view/${asset.id}`}
           title={asset.title}
           sandbox="allow-scripts"
         />

@@ -283,7 +283,7 @@ app.delete("/api/assets/:id", async (c) => {
   return c.body(null, 204)
 })
 
-app.get("/assets/:id", async (c) => {
+app.get("/view/:id", async (c) => {
   const auth = await authorize(c)
   if (auth instanceof Error) return respondError(c, auth)
   const id = AssetIdSchema.safeParse(c.req.param("id"))
@@ -466,7 +466,7 @@ app.get(
 )
 
 app.notFound((c) => {
-  if (c.req.path.startsWith("/api/") || c.req.path.startsWith("/assets/")) {
+  if (c.req.path.startsWith("/api/") || c.req.path.startsWith("/view/")) {
     return c.json({ error: { code: "ASSET_NOT_FOUND" as const, message: "Route not found" } }, 404)
   }
   return c.env.ASSETS.fetch(c.req.raw)

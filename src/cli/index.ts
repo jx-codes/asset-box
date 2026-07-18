@@ -163,4 +163,4 @@ if (result instanceof Error) {
 }
 
 console.log(`${result.status === "created" ? "Uploaded" : "Already exists"}: ${result.asset.title}`)
-console.log(`${args.url.replace(/\/$/, "")}/assets/${result.asset.id}`)
+console.log(`${args.url.replace(/\/$/, "")}/view/${result.asset.id}`)
