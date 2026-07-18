@@ -10,3 +10,4 @@ aux/
 *.tsbuildinfo
 .DS_Store
 *.log
+wrangler.jsonc

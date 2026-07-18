@@ -35,6 +35,7 @@ Asset Box is a single-user Cloudflare application for uploading, organizing, and
 ```sh
 bun install
 cp .dev.vars.example .dev.vars
+cp wrangler.example.jsonc wrangler.jsonc
 ```
 
 Replace the values in `.dev.vars` with a development password and a random session secret of at least 32 characters. Never commit `.dev.vars`.
@@ -79,7 +80,9 @@ After signing in, open `/api/docs` for the Scalar API reference or fetch `/api/o
 
 ## Cloudflare deployment
 
-Create a D1 database and R2 bucket for each environment, then replace the placeholder resource identifiers and names in `wrangler.jsonc`.
+Create a D1 database and R2 bucket for each deployed environment.
+
+Replace the placeholder resource identifiers and names in the ignored `wrangler.jsonc`. This local file contains deployment-specific bindings and must not be committed.
 
 Set the browser password and session-signing secret through Wrangler's interactive secret prompt:
 
