@@ -1,6 +1,6 @@
 import { useValue } from "@legendapp/state/react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { Archive, ArchiveRestore, Tags, Trash2 } from "lucide-react"
+import { Archive, ArchiveRestore, Share2, Tags, Trash2 } from "lucide-react"
 import type { Asset, Tag } from "@/shared/domain"
 import { api, expectApiValue } from "@/client/lib/api"
 import { Button } from "@/components/ui/button"
@@ -21,9 +21,11 @@ import {
   clearDeletedAssetSelection,
   openAssetTagEditor,
   openDeleteConfirmation,
+  openPublicShareManager,
   toggleAssetTag,
 } from "../state/library.actions"
 import { library$ } from "../state/library.store"
+import { PublicShareDialog } from "./public-share-dialog"
 
 export function AssetActions({ asset, tags }: { asset: Asset; tags: Tag[] }) {
   const dialog = useValue(library$.assetDialog)
@@ -62,10 +64,20 @@ export function AssetActions({ asset, tags }: { asset: Asset; tags: Tag[] }) {
 
   const editingTags = dialog.tag === "editing-tags" && dialog.assetId === asset.id
   const confirmingDelete = dialog.tag === "confirming-delete" && dialog.assetId === asset.id
+  const sharing = dialog.tag === "sharing" && dialog.assetId === asset.id
 
   return (
     <>
       <div className="flex items-center gap-1">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => openPublicShareManager(asset.id)}
+          aria-label="Manage public sharing"
+        >
+          <Share2 />
+          <span className="hidden xl:inline">Share</span>
+        </Button>
         <Button
           variant="outline"
           size="sm"
@@ -103,6 +115,7 @@ export function AssetActions({ asset, tags }: { asset: Asset; tags: Tag[] }) {
           <Trash2 />
         </Button>
       </div>
+      {sharing ? <PublicShareDialog asset={asset} /> : null}
 
       <Dialog open={editingTags} onOpenChange={(open) => !open && closeAssetDialog()}>
         <DialogContent>

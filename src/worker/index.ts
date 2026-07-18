@@ -21,6 +21,7 @@ import {
   UploadResponseSchema,
 } from "@/shared/domain"
 import { deleteAsset } from "./assets/delete-service"
+import { assetHtmlResponse } from "./assets/response"
 import { uploadAsset } from "./assets/service"
 import { authorize, authorizeBrowserSession, checkPasswordAttempt } from "./auth/authorize"
 import { createSessionToken, sessionCookieOptions } from "./auth/session"
@@ -49,6 +50,7 @@ import {
   respondError,
 } from "./http"
 import { notifyClients } from "./realtime"
+import { registerPublicShareRoutes } from "./public-shares/routes"
 import { registerWorkRequestRoutes } from "./work-requests/routes"
 
 export { AssetBoxCoordinator }
@@ -311,16 +313,11 @@ app.get("/view/:id", async (c) => {
     return respondError(c, new StorageFailureError({ operation: "asset read" }))
   }
 
-  return new Response(object.body, {
-    headers: {
-      "Cache-Control": "private, max-age=3600",
-      "Content-Disposition": `inline; filename="${id.data}.html"`,
-      "Content-Security-Policy":
-        "sandbox allow-scripts; default-src * data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src 'none'; form-action 'none'; base-uri 'none'",
-      "Content-Type": "text/html; charset=utf-8",
-      "Referrer-Policy": "no-referrer",
-      "X-Content-Type-Options": "nosniff",
-    },
+  return assetHtmlResponse({
+    body: object.body,
+    cacheControl: "private, max-age=3600",
+    disposition: "inline",
+    filename: `${id.data}.html`,
   })
 })
 
@@ -342,6 +339,7 @@ app.openAPIRegistry.registerComponent("securitySchemes", "serviceToken", {
   description: "Use a service token created in the authenticated web interface.",
 })
 
+registerPublicShareRoutes(app)
 registerWorkRequestRoutes(app)
 
 const browserSessionSecurity: Record<string, string[]>[] = [{ sessionCookie: [] }]

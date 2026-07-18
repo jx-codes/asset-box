@@ -4,6 +4,7 @@ import { useEffect } from "react"
 import { ApiRequestError } from "@/client/lib/api"
 import { AssetEventSchema } from "@/shared/events"
 import { libraryQueryKey } from "../api/library.queries"
+import { publicShareQueryKey } from "../api/public-share.queries"
 import { workRequestQueryKey } from "../api/work-request.queries"
 import {
   clearDeletedAssetSelection,
@@ -41,6 +42,7 @@ export function useLiveUpdates() {
       }
       void queryClient.invalidateQueries({ queryKey: libraryQueryKey })
       void queryClient.invalidateQueries({ queryKey: workRequestQueryKey })
+      void queryClient.invalidateQueries({ queryKey: publicShareQueryKey })
     }
     const onError = () => markLiveDisconnected()
 
@@ -49,6 +51,7 @@ export function useLiveUpdates() {
     events.addEventListener("asset-updated", onLibraryEvent)
     events.addEventListener("asset-deleted", onLibraryEvent)
     events.addEventListener("tags-changed", onLibraryEvent)
+    events.addEventListener("public-shares-changed", onLibraryEvent)
     events.addEventListener("work-request-changed", onLibraryEvent)
     events.addEventListener("work-result-created", onLibraryEvent)
     events.addEventListener("error", onError)

@@ -36,6 +36,16 @@ export class ServiceTokenNotFoundError extends errore.createTaggedError({
   message: "Service token $id was not found",
 }) {}
 
+export class PublicShareNotFoundError extends errore.createTaggedError({
+  name: "PublicShareNotFoundError",
+  message: "Public share $id was not found",
+}) {}
+
+export class PublicShareUnavailableError extends errore.createTaggedError({
+  name: "PublicShareUnavailableError",
+  message: "This public share is not available",
+}) {}
+
 export class WorkRequestNotFoundError extends errore.createTaggedError({
   name: "WorkRequestNotFoundError",
   message: "Work request $id was not found",
@@ -174,6 +184,9 @@ export function toErrorResponse(error: Error): ErrorResponse {
   }
   if (ServiceTokenNotFoundError.is(error)) {
     return response({ code: "SERVICE_TOKEN_NOT_FOUND", message: error.message, status: 404 })
+  }
+  if (PublicShareNotFoundError.is(error) || PublicShareUnavailableError.is(error)) {
+    return response({ code: "PUBLIC_SHARE_NOT_FOUND", message: error.message, status: 404 })
   }
   if (WorkRequestNotFoundError.is(error)) {
     return response({ code: "WORK_REQUEST_NOT_FOUND", message: error.message, status: 404 })

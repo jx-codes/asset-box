@@ -11,6 +11,7 @@ export type AssetDialogState =
   | { tag: "closed" }
   | { tag: "editing-tags"; assetId: string; selectedSlugs: string[] }
   | { tag: "confirming-delete"; assetId: string }
+  | { tag: "sharing"; assetId: string }
 
 export type TagManagerState =
   | { tag: "closed" }

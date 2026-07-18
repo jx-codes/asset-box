@@ -3,8 +3,14 @@ import type { AssetEvent } from "@/shared/events"
 import { InternalFailureError } from "./errors"
 import type { AppContext } from "./http"
 
-export async function notifyClients({ c, event }: { c: Context<AppContext>; event: AssetEvent }) {
-  const coordinator = c.env.COORDINATOR.get(c.env.COORDINATOR.idFromName("events"))
+export async function broadcastEvent({
+  env,
+  event,
+}: {
+  env: AppContext["Bindings"]
+  event: AssetEvent
+}) {
+  const coordinator = env.COORDINATOR.get(env.COORDINATOR.idFromName("events"))
   const notified = await coordinator
     .fetch("https://coordinator/broadcast", {
       method: "POST",
@@ -16,4 +22,8 @@ export async function notifyClients({ c, event }: { c: Context<AppContext>; even
     return
   }
   if (!notified.ok) console.warn("Committed change, but live update returned", notified.status)
+}
+
+export function notifyClients({ c, event }: { c: Context<AppContext>; event: AssetEvent }) {
+  return broadcastEvent({ env: c.env, event })
 }

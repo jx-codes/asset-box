@@ -42,6 +42,10 @@ export function toggleAssetTag(slug: string) {
   library$.assetDialog.set({ ...dialog, selectedSlugs })
 }
 
+export function openPublicShareManager(assetId: string) {
+  library$.assetDialog.set({ tag: "sharing", assetId })
+}
+
 export function openDeleteConfirmation(assetId: string) {
   library$.assetDialog.set({ tag: "confirming-delete", assetId })
 }

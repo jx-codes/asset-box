@@ -4,6 +4,7 @@ import {
   clearDeletedAssetSelection,
   filterByTag,
   openAssetTagEditor,
+  openPublicShareManager,
   selectAsset,
   showArchivedAssets,
   toggleAssetTag,
@@ -57,6 +58,13 @@ describe("library actions", () => {
       assetId: asset.id,
       selectedSlugs: ["jmcodes"],
     })
+  })
+
+  it("opens public sharing for the selected canonical asset", () => {
+    selectAsset(asset.id)
+    openPublicShareManager(asset.id)
+
+    expect(library$.assetDialog.peek()).toEqual({ tag: "sharing", assetId: asset.id })
   })
 
   it("clears selection and dialog state after a remote delete event", () => {

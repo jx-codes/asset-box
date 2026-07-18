@@ -20,6 +20,13 @@ import {
   type TagInput,
 } from "@/shared/domain"
 import {
+  type PublicShareCreateInput,
+  PublicShareCreateInputSchema,
+  PublicShareCreatedSchema,
+  PublicShareListSchema,
+  PublicShareSchema,
+} from "@/shared/public-shares"
+import {
   type WorkCommentInput,
   WorkCommentInputSchema,
   WorkCommentSchema,
@@ -140,6 +147,24 @@ export const api = {
       path: `/api/work-requests/${requestId}/resubmit`,
       method: "POST",
       schema: WorkRequestSchema,
+    }),
+  publicShares: (assetId: string) =>
+    requestJson({
+      path: `/api/assets/${assetId}/public-shares`,
+      schema: PublicShareListSchema,
+    }),
+  createPublicShare: ({ assetId, input }: { assetId: string; input: PublicShareCreateInput }) =>
+    requestJson({
+      path: `/api/assets/${assetId}/public-shares`,
+      method: "POST",
+      body: PublicShareCreateInputSchema.parse(input),
+      schema: PublicShareCreatedSchema,
+    }),
+  revokePublicShare: ({ assetId, shareId }: { assetId: string; shareId: string }) =>
+    requestJson({
+      path: `/api/assets/${assetId}/public-shares/${shareId}`,
+      method: "DELETE",
+      schema: PublicShareSchema,
     }),
   serviceTokens: () => requestJson({ path: "/api/service-tokens", schema: ServiceTokenListSchema }),
   createServiceToken: (input: ServiceTokenInput) =>
