@@ -31,11 +31,6 @@ export class AssetDeletePendingError extends errore.createTaggedError({
   message: "Asset $id is waiting for storage cleanup; retry its delete request",
 }) {}
 
-export class AssetWorkLinkedError extends errore.createTaggedError({
-  name: "AssetWorkLinkedError",
-  message: "Asset $id is linked to durable work history and cannot be deleted",
-}) {}
-
 export class ServiceTokenNotFoundError extends errore.createTaggedError({
   name: "ServiceTokenNotFoundError",
   message: "Service token $id was not found",
@@ -166,9 +161,6 @@ export function toErrorResponse(error: Error): ErrorResponse {
   }
   if (AssetDeletePendingError.is(error)) {
     return response({ code: "ASSET_DELETE_PENDING", message: error.message, status: 409 })
-  }
-  if (AssetWorkLinkedError.is(error)) {
-    return response({ code: "ASSET_WORK_LINKED", message: error.message, status: 409 })
   }
   if (ServiceTokenNotFoundError.is(error)) {
     return response({ code: "SERVICE_TOKEN_NOT_FOUND", message: error.message, status: 404 })

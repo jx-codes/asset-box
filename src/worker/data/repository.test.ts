@@ -32,7 +32,7 @@ function fakeDatabase() {
 }
 
 describe("asset deletion", () => {
-  it("rejects deletion before R2 cleanup when durable work references the asset", async () => {
+  it("tombstones an asset even when durable work references it", async () => {
     const { db, sql } = fakeDatabase()
 
     const result = await beginAssetDeletion({
@@ -41,8 +41,8 @@ describe("asset deletion", () => {
       now: new Date("2026-07-18T11:00:00.000Z"),
     })
 
-    expect(result).toBeInstanceOf(Error)
-    expect(result).toMatchObject({ _tag: "AssetWorkLinkedError" })
-    expect(sql.some((query) => query.includes("UPDATE assets SET deleted_at"))).toBe(false)
+    expect(result).toEqual({ tag: "deleting", objectKey: `assets/${"a".repeat(64)}.html` })
+    expect(sql.some((query) => query.includes("work_requests"))).toBe(false)
+    expect(sql.some((query) => query.includes("UPDATE assets SET deleted_at"))).toBe(true)
   })
 })

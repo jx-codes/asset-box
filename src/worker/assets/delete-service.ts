@@ -1,6 +1,6 @@
 import type { Env } from "../env"
 import { StorageFailureError } from "../errors"
-import { beginAssetDeletion, purgeDeletedAsset } from "../data/repository"
+import { beginAssetDeletion } from "../data/repository"
 
 export async function deleteAsset({ env, id, now }: { env: Env; id: string; now: Date }) {
   const deletion = await beginAssetDeletion({ db: env.ASSET_BOX_DB, id, now })
@@ -11,5 +11,5 @@ export async function deleteAsset({ env, id, now }: { env: Env; id: string; now:
   )
   if (removed instanceof Error) return removed
 
-  return purgeDeletedAsset({ db: env.ASSET_BOX_DB, id })
+  return { tag: "deleted" as const, id }
 }
