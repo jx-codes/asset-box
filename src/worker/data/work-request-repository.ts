@@ -79,6 +79,7 @@ const SubmittedCommentRowSchema = z.object({
 const WorkTargetRowSchema = z.object({
   id: z.string(),
   parent_asset_id: z.string().nullable(),
+  source_asset_id: z.string().nullable(),
   title: z.string(),
   blurb: z.string(),
 })
@@ -608,7 +609,35 @@ export async function getClaimContext({
   const [target, comments] = await Promise.all([
     readFirst({
       statement: db
-        .prepare("SELECT id, parent_asset_id, title, blurb FROM work_requests WHERE id = ?")
+        .prepare(
+          `WITH request_target AS (
+             SELECT
+               wr.id,
+               wr.parent_asset_id,
+               wr.title AS request_title,
+               wr.blurb AS request_blurb,
+               COALESCE(
+                 (
+                   SELECT result.asset_id
+                   FROM work_results result
+                   WHERE result.request_id = wr.id
+                   ORDER BY result.created_at DESC, result.asset_id DESC
+                   LIMIT 1
+                 ),
+                 wr.parent_asset_id
+               ) AS source_asset_id
+             FROM work_requests wr
+             WHERE wr.id = ?
+           )
+           SELECT
+             target.id,
+             target.parent_asset_id,
+             target.source_asset_id,
+             COALESCE(source.title, target.request_title) AS title,
+             COALESCE(source.blurb, target.request_blurb) AS blurb
+           FROM request_target target
+           LEFT JOIN assets source ON source.id = target.source_asset_id`,
+        )
         .bind(claim.requestId),
       schema: WorkTargetRowSchema,
       operation: "claimed work target lookup",
@@ -633,6 +662,7 @@ export async function getClaimContext({
 
   return {
     claim,
+    sourceAssetId: target.value.source_asset_id,
     target:
       target.value.parent_asset_id === null
         ? {

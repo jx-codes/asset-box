@@ -4,6 +4,7 @@ import type { WorkClaim } from "@/shared/work-requests"
 import {
   claimWorkRequest,
   listAgentWork,
+  getClaimContext,
   requireOwnedClaim,
   submitAllDraftComments,
 } from "./work-request-repository"
@@ -114,6 +115,73 @@ describe("work request repository invariants", () => {
       claimedByPrincipalId: principalId,
       commentIds: [expect.any(String)],
     })
+  })
+
+  it("uses the latest result asset as follow-up source while preserving the request target", async () => {
+    const captured: CapturedStatement[] = []
+    const sourceAssetId = "c".repeat(64)
+    const claimRow = {
+      id: "1fd7b329-9c89-4822-abdb-79e93cc2089f",
+      request_id: requestId,
+      service_token_id: principalId,
+      claimed_at: now.toISOString(),
+      expires_at: "2026-07-18T10:15:00.000Z",
+      result_idempotency_key: "eeb34286-1d14-4c13-8c3f-271a7ad94de4",
+      completed_at: null,
+    }
+    const db = {
+      prepare: (sql: string) => {
+        const results = (() => {
+          if (sql.includes("FROM work_claims WHERE id")) return { first: claimRow }
+          if (sql.includes("SELECT comment_id FROM claim_comments")) {
+            return { all: [{ comment_id: "b809d763-f56f-4a0f-9eb9-fae9d8562f17" }] }
+          }
+          if (sql.includes("WITH request_target")) {
+            return {
+              first: {
+                id: requestId,
+                parent_asset_id: null,
+                source_asset_id: sourceAssetId,
+                title: "Latest result",
+                blurb: "Metadata from the latest generated asset.",
+              },
+            }
+          }
+          if (sql.includes("INNER JOIN claim_comments")) {
+            return {
+              all: [
+                {
+                  id: "b809d763-f56f-4a0f-9eb9-fae9d8562f17",
+                  body: "Refine the latest version.",
+                  submitted_at: "2026-07-18T09:55:00.000Z",
+                },
+              ],
+            }
+          }
+          return {}
+        })()
+        return statement(sql, captured, results)
+      },
+    } as unknown as D1Database
+
+    const context = await getClaimContext({
+      db,
+      claimId: claimRow.id,
+      principalId,
+      now,
+    })
+
+    expect(context).not.toBeInstanceOf(Error)
+    if (context instanceof Error) throw context
+    expect(context.sourceAssetId).toBe(sourceAssetId)
+    expect(context.target).toEqual({
+      tag: "new-asset",
+      title: "Latest result",
+      blurb: "Metadata from the latest generated asset.",
+    })
+    const sourceQuery = captured.find((entry) => entry.sql.includes("WITH request_target"))
+    expect(sourceQuery?.sql).toContain("FROM work_results result")
+    expect(sourceQuery?.sql).toContain("ORDER BY result.created_at DESC")
   })
 
   it("rejects claim access by another service-token principal", async () => {

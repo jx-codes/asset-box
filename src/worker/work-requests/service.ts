@@ -20,13 +20,13 @@ export async function pullClaimContext({
 }) {
   const context = await getClaimContext({ db: env.ASSET_BOX_DB, claimId, principalId, now })
   if (context instanceof Error) return context
-  if (context.target.tag === "new-asset") {
+  if (context.sourceAssetId === null) {
     return WorkPullContextSchema.parse({ ...context, source: { tag: "none" } })
   }
 
-  const object = await env.ASSET_BOX_BUCKET.get(
-    `assets/${context.target.parentAssetId}.html`,
-  ).catch((cause) => new StorageFailureError({ operation: "work request source read", cause }))
+  const object = await env.ASSET_BOX_BUCKET.get(`assets/${context.sourceAssetId}.html`).catch(
+    (cause) => new StorageFailureError({ operation: "work request source read", cause }),
+  )
   if (object instanceof Error) return object
   if (object === null) return new StorageFailureError({ operation: "work request source read" })
   const html = await object
@@ -36,7 +36,7 @@ export async function pullClaimContext({
 
   return WorkPullContextSchema.parse({
     ...context,
-    source: { tag: "html", assetId: context.target.parentAssetId, html },
+    source: { tag: "html", assetId: context.sourceAssetId, html },
   })
 }
 
@@ -78,7 +78,7 @@ export async function pushWorkResult({
 
   const context = await getClaimContext({ db: env.ASSET_BOX_DB, claimId, principalId, now })
   if (context instanceof Error) return context
-  const parentAssetId = context.target.tag === "asset-edit" ? context.target.parentAssetId : null
+  const parentAssetId = context.sourceAssetId
   if (parentAssetId === id) {
     return new WorkResultConflictError({
       reason: "Result HTML is unchanged from the parent asset",
