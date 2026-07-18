@@ -4,6 +4,7 @@ import { useEffect } from "react"
 import { ApiRequestError } from "@/client/lib/api"
 import { AssetEventSchema } from "@/shared/events"
 import { libraryQueryKey } from "../api/library.queries"
+import { workRequestQueryKey } from "../api/work-request.queries"
 import {
   clearDeletedAssetSelection,
   markLiveConnected,
@@ -34,10 +35,12 @@ export function useLiveUpdates() {
         return
       }
       if (parsed.data.tag === "asset-created") showNewAsset(parsed.data.asset)
+      if (parsed.data.tag === "work-result-created") showNewAsset(parsed.data.asset)
       if (parsed.data.tag === "asset-deleted") {
         clearDeletedAssetSelection(parsed.data.assetId)
       }
       void queryClient.invalidateQueries({ queryKey: libraryQueryKey })
+      void queryClient.invalidateQueries({ queryKey: workRequestQueryKey })
     }
     const onError = () => markLiveDisconnected()
 
@@ -46,6 +49,8 @@ export function useLiveUpdates() {
     events.addEventListener("asset-updated", onLibraryEvent)
     events.addEventListener("asset-deleted", onLibraryEvent)
     events.addEventListener("tags-changed", onLibraryEvent)
+    events.addEventListener("work-request-changed", onLibraryEvent)
+    events.addEventListener("work-result-created", onLibraryEvent)
     events.addEventListener("error", onError)
 
     return () => events.close()

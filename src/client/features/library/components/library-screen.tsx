@@ -1,7 +1,17 @@
 import { useValue } from "@legendapp/state/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { lazy, Suspense } from "react"
-import { Archive, Box, Circle, CodeXml, Inbox, KeyRound, LogOut, Plus } from "lucide-react"
+import {
+  Archive,
+  Box,
+  Circle,
+  CodeXml,
+  FilePlus2,
+  Inbox,
+  KeyRound,
+  LogOut,
+  Plus,
+} from "lucide-react"
 import { sessionQueryKey } from "@/client/app"
 import { api, expectApiValue } from "@/client/lib/api"
 import { Button } from "@/components/ui/button"
@@ -17,11 +27,13 @@ import {
   showArchivedAssets,
 } from "../state/library.actions"
 import { library$ } from "../state/library.store"
+import { openNewAssetRequest } from "../state/work-request.actions"
 import { filterAssets } from "../utils/filter-assets"
 import { AssetList } from "./asset-list"
 import { AssetPreview } from "./asset-preview"
 import { NewAssetToast } from "./new-asset-toast"
 import { TagSidebar } from "./tag-sidebar"
+import { WorkRequestPanel } from "./work-request-panel"
 
 const TagManagerDialog = lazy(() =>
   import("./tag-manager-dialog").then((module) => ({ default: module.TagManagerDialog })),
@@ -94,6 +106,15 @@ export function LibraryScreen() {
             />
             {liveConnection.tag === "connected" ? "Live" : "Reconnecting"}
           </span>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={openNewAssetRequest}
+            aria-label="Request a new asset"
+          >
+            <FilePlus2 />
+            <span className="hidden sm:inline">Request asset</span>
+          </Button>
           <Button
             variant="ghost"
             size="icon-sm"
@@ -170,6 +191,7 @@ export function LibraryScreen() {
           mobileHidden={selection.tag === "selected"}
         />
         <AssetPreview asset={selectedAsset} tags={library.data.tags} />
+        <WorkRequestPanel />
       </div>
 
       {tagManager.tag === "closed" ? null : (

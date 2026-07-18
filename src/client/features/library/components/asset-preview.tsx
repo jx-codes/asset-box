@@ -1,8 +1,9 @@
-import { ArrowLeft, ExternalLink } from "lucide-react"
+import { ArrowLeft, ExternalLink, MessageSquarePlus } from "lucide-react"
 import type { Asset, Tag } from "@/shared/domain"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { clearAssetSelection } from "../state/library.actions"
+import { openAssetWorkRequest } from "../state/work-request.actions"
 import { AssetActions } from "./asset-actions"
 
 export function AssetPreview({ asset, tags }: { asset: Asset | undefined; tags: Tag[] }) {
@@ -35,6 +36,15 @@ export function AssetPreview({ asset, tags }: { asset: Asset | undefined; tags: 
           <h1 className="truncate text-sm font-semibold">{asset.title}</h1>
           <p className="truncate text-xs text-muted-foreground">{asset.blurb}</p>
         </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => openAssetWorkRequest(asset.id)}
+          aria-label="Open asset work requests"
+        >
+          <MessageSquarePlus />
+          <span className="hidden xl:inline">Request</span>
+        </Button>
         <AssetActions asset={asset} tags={tags} />
         <Button variant="outline" size="sm" asChild>
           <a href={`/view/${asset.id}`} target="_blank" rel="noreferrer">

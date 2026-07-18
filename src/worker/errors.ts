@@ -31,9 +31,54 @@ export class AssetDeletePendingError extends errore.createTaggedError({
   message: "Asset $id is waiting for storage cleanup; retry its delete request",
 }) {}
 
+export class AssetWorkLinkedError extends errore.createTaggedError({
+  name: "AssetWorkLinkedError",
+  message: "Asset $id is linked to durable work history and cannot be deleted",
+}) {}
+
 export class ServiceTokenNotFoundError extends errore.createTaggedError({
   name: "ServiceTokenNotFoundError",
   message: "Service token $id was not found",
+}) {}
+
+export class WorkRequestNotFoundError extends errore.createTaggedError({
+  name: "WorkRequestNotFoundError",
+  message: "Work request $id was not found",
+}) {}
+
+export class WorkCommentNotFoundError extends errore.createTaggedError({
+  name: "WorkCommentNotFoundError",
+  message: "Comment $id was not found in work request $requestId",
+}) {}
+
+export class WorkNotSubmittedError extends errore.createTaggedError({
+  name: "WorkNotSubmittedError",
+  message: "Work request $id has no submitted comments to claim",
+}) {}
+
+export class WorkAlreadyClaimedError extends errore.createTaggedError({
+  name: "WorkAlreadyClaimedError",
+  message: "Work request $id already has an unexpired claim",
+}) {}
+
+export class WorkClaimNotFoundError extends errore.createTaggedError({
+  name: "WorkClaimNotFoundError",
+  message: "Work claim $id was not found",
+}) {}
+
+export class WorkClaimExpiredError extends errore.createTaggedError({
+  name: "WorkClaimExpiredError",
+  message: "Work claim $id expired at $expiresAt",
+}) {}
+
+export class WorkClaimForbiddenError extends errore.createTaggedError({
+  name: "WorkClaimForbiddenError",
+  message: "Work claim $id belongs to another service-token principal",
+}) {}
+
+export class WorkResultConflictError extends errore.createTaggedError({
+  name: "WorkResultConflictError",
+  message: "$reason",
 }) {}
 
 export class TagNotFoundError extends errore.createTaggedError({
@@ -122,8 +167,35 @@ export function toErrorResponse(error: Error): ErrorResponse {
   if (AssetDeletePendingError.is(error)) {
     return response({ code: "ASSET_DELETE_PENDING", message: error.message, status: 409 })
   }
+  if (AssetWorkLinkedError.is(error)) {
+    return response({ code: "ASSET_WORK_LINKED", message: error.message, status: 409 })
+  }
   if (ServiceTokenNotFoundError.is(error)) {
     return response({ code: "SERVICE_TOKEN_NOT_FOUND", message: error.message, status: 404 })
+  }
+  if (WorkRequestNotFoundError.is(error)) {
+    return response({ code: "WORK_REQUEST_NOT_FOUND", message: error.message, status: 404 })
+  }
+  if (WorkCommentNotFoundError.is(error)) {
+    return response({ code: "WORK_COMMENT_NOT_FOUND", message: error.message, status: 404 })
+  }
+  if (WorkNotSubmittedError.is(error)) {
+    return response({ code: "WORK_NOT_SUBMITTED", message: error.message, status: 409 })
+  }
+  if (WorkAlreadyClaimedError.is(error)) {
+    return response({ code: "WORK_ALREADY_CLAIMED", message: error.message, status: 409 })
+  }
+  if (WorkClaimNotFoundError.is(error)) {
+    return response({ code: "WORK_CLAIM_NOT_FOUND", message: error.message, status: 404 })
+  }
+  if (WorkClaimExpiredError.is(error)) {
+    return response({ code: "WORK_CLAIM_EXPIRED", message: error.message, status: 409 })
+  }
+  if (WorkClaimForbiddenError.is(error)) {
+    return response({ code: "WORK_CLAIM_FORBIDDEN", message: error.message, status: 401 })
+  }
+  if (WorkResultConflictError.is(error)) {
+    return response({ code: "WORK_RESULT_CONFLICT", message: error.message, status: 409 })
   }
   if (TagNotFoundError.is(error)) {
     return response({ code: "TAG_NOT_FOUND", message: error.message, status: 404 })

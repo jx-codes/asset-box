@@ -1,46 +1,20 @@
 import * as errore from "errore"
 import { AssetSchema, type Tag, TagSlugSchema } from "@/shared/domain"
-import type { Env } from "../env"
-import { AssetDeletePendingError, InvalidInputError, StorageFailureError } from "../errors"
 import {
   findAsset,
   findAssetStorageRecord,
   insertAsset,
   requireTagsBySlugs,
 } from "../data/repository"
-
-const MAX_ASSET_BYTES = 5 * 1024 * 1024
-
+import type { Env } from "../env"
+import { AssetDeletePendingError, InvalidInputError, StorageFailureError } from "../errors"
+import { hashAssetBytes, validateHtmlBytes } from "./html-content"
 type UploadInput = {
   file: File
   title: string
   blurb: string
   tagSlugs: string[]
 }
-
-function toHex(bytes: Uint8Array) {
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")
-}
-
-function validateFile(file: File) {
-  if (file.size === 0) return new InvalidInputError({ reason: "The HTML file is empty" })
-  if (file.size > MAX_ASSET_BYTES) {
-    return new InvalidInputError({ reason: "The HTML file must be 5 MB or smaller" })
-  }
-  return { tag: "valid-file" as const }
-}
-
-function validateHtmlPrefix(bytes: ArrayBuffer) {
-  const prefix = new TextDecoder().decode(bytes.slice(0, 4096)).trimStart().toLowerCase()
-  if (prefix.startsWith("<!doctype html") || prefix.startsWith("<html")) {
-    return { tag: "valid-html" as const }
-  }
-  return new InvalidInputError({
-    reason:
-      "The uploaded file must be a complete HTML document starting with <!doctype html> or <html>",
-  })
-}
-
 function normalizeTagSlugs(tagSlugs: string[]) {
   const parsed = errore.try({
     try: () => Array.from(new Set(tagSlugs.map((slug) => TagSlugSchema.parse(slug)))),
@@ -80,25 +54,20 @@ export async function uploadAsset({
   input: UploadInput
   now: Date
 }) {
-  const validFile = validateFile(input.file)
-  if (validFile instanceof Error) return validFile
-
   const tagSlugs = normalizeTagSlugs(input.tagSlugs)
   if (tagSlugs instanceof Error) return tagSlugs
 
-  const bytes = await input.file
+  const buffer = await input.file
     .arrayBuffer()
     .catch((cause) => new StorageFailureError({ operation: "upload reading", cause }))
-  if (bytes instanceof Error) return bytes
+  if (buffer instanceof Error) return buffer
+  const bytes = new Uint8Array(buffer)
 
-  const validHtml = validateHtmlPrefix(bytes)
+  const validHtml = validateHtmlBytes(bytes)
   if (validHtml instanceof Error) return validHtml
 
-  const digest = await crypto.subtle
-    .digest("SHA-256", bytes)
-    .catch((cause) => new StorageFailureError({ operation: "content hashing", cause }))
-  if (digest instanceof Error) return digest
-  const id = toHex(new Uint8Array(digest))
+  const id = await hashAssetBytes(bytes)
+  if (id instanceof Error) return id
 
   const existing = await findAsset({ db: env.ASSET_BOX_DB, id })
   if (existing instanceof Error) return existing

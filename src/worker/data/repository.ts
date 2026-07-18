@@ -12,6 +12,7 @@ import {
 } from "@/shared/domain"
 import {
   AssetNotFoundError,
+  AssetWorkLinkedError,
   DatabaseFailureError,
   TagConflictError,
   TagNotFoundError,
@@ -334,6 +335,21 @@ export async function beginAssetDeletion({
   const record = await findAssetStorageRecord({ db, id })
   if (record instanceof Error) return record
   if (record.tag === "missing") return new AssetNotFoundError({ id })
+
+  const linkedWork = await readFirst({
+    statement: db
+      .prepare(
+        `SELECT 1 AS linked FROM work_requests WHERE parent_asset_id = ?
+         UNION ALL
+         SELECT 1 AS linked FROM asset_revisions WHERE asset_id = ? OR parent_asset_id = ?
+         LIMIT 1`,
+      )
+      .bind(id, id, id),
+    schema: z.object({ linked: z.number() }),
+    operation: "asset work lineage lookup",
+  })
+  if (linkedWork instanceof Error) return linkedWork
+  if (linkedWork.tag === "found") return new AssetWorkLinkedError({ id })
 
   const result = await db
     .prepare("UPDATE assets SET deleted_at = COALESCE(deleted_at, ?) WHERE id = ?")

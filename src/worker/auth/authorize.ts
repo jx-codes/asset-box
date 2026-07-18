@@ -112,6 +112,12 @@ async function authorizeServiceToken({
   return { tag: "service-token" as const, tokenId: authenticated.value.id }
 }
 
+export async function authorizeServiceTokenPrincipal(c: Context<{ Bindings: Env }>) {
+  const authorization = c.req.header("Authorization")
+  if (!authorization?.startsWith(BEARER_PREFIX)) return new AuthRequiredError()
+  return authorizeServiceToken({ c, token: authorization.slice(BEARER_PREFIX.length) })
+}
+
 export async function authorize(c: Context<{ Bindings: Env }>) {
   const authorization = c.req.header("Authorization")
   if (!authorization) return authorizeBrowserSession(c)

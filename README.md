@@ -1,6 +1,6 @@
 # Asset Box
 
-Asset Box is a single-user Cloudflare application for uploading, organizing, and viewing self-contained HTML assets. It provides a password-protected web library and revocable service tokens for CLI and agent uploads.
+Asset Box is a single-user Cloudflare application for uploading, organizing, reviewing, and revising self-contained HTML assets. It provides a password-protected web library plus revocable service-token workflows for CLIs and agents.
 
 ## Features
 
@@ -8,6 +8,10 @@ Asset Box is a single-user Cloudflare application for uploading, organizing, and
 - D1 metadata and R2 object storage
 - Active and archived asset views
 - Tag definitions with agent-facing guidance
+- Durable freeform work requests for existing and completely new assets
+- Private draft comments with explicit individual and atomic submit-all actions
+- Expiring service-token claims with immutable comment snapshots
+- Idempotent result pushes that create content-addressed revisions with request lineage
 - Signed, HttpOnly browser sessions
 - Revocable service tokens with optional expiration and last-used metadata
 - Login throttling and live updates through Durable Objects
@@ -49,7 +53,7 @@ bun run dev
 
 Vite prints the local URL. Sign in with the development password from `.dev.vars`.
 
-## Service tokens and CLI uploads
+## Service tokens and CLI workflows
 
 Browser login uses `ASSET_BOX_PASSWORD`. Agents and the CLI use revocable service tokens instead of the account password.
 
@@ -61,14 +65,36 @@ Browser login uses `ASSET_BOX_PASSWORD`. Agents and the CLI use revocable servic
 ```sh
 export ASSET_BOX_URL=https://asset-box.example.com
 export ASSET_BOX_SERVICE_TOKEN=abx_...
+```
 
+Upload a standalone asset directly:
+
+```sh
 bun run asset-box upload ./page.html \
   --title "Launch page" \
   --blurb "Finished landing page for the launch" \
   --tags landing-page,launch
 ```
 
-Tag slugs must already exist in the web interface. Uploading identical HTML returns the existing asset rather than creating a duplicate.
+Pull the oldest available submitted request, atomically claim its current submitted-comment snapshot, and materialize `request.json` plus `source.html` when the request edits an existing asset:
+
+```sh
+bun run asset-box pull --out ./asset-box-work --lease-seconds 900
+# Or claim a specific submitted request:
+bun run asset-box pull 9a232244-4e6b-4592-ad15-6ca4e2a0e45f --out ./asset-box-work
+```
+
+Create a complete result document at `./asset-box-work/result.html`, then push it with metadata:
+
+```sh
+bun run asset-box push ./asset-box-work \
+  --html result.html \
+  --title "Updated launch page" \
+  --blurb "Revision implementing the submitted feedback" \
+  --tags landing-page,launch
+```
+
+`request.json` carries the claim's server-issued idempotency key. Repeating the same push returns the original result instead of creating a second revision. New-asset requests omit `source.html`. Tag slugs must already exist in the web interface.
 
 ## API
 
@@ -77,6 +103,10 @@ After signing in, open `/api/docs` for the Scalar API reference or fetch `/api/o
 - Browser requests authenticate with the signed `asset_box_session` cookie.
 - Agent and CLI requests authenticate with `Authorization: Bearer <service-token>`.
 - Service-token creation, listing, and revocation require a browser-authenticated session.
+- Browser-only work-request routes create requests, queue private drafts, and explicitly submit one or all drafts.
+- Service-token agent routes list submitted work, claim a snapshot, pull context/source HTML, and push a full result document.
+- Result HTML is stored under its SHA-256 asset ID; the parent object and parent asset row are never overwritten.
+- D1 is canonical for comments, claims, snapshots, and lineage. Durable Object events only prompt subscribers to refetch.
 
 ## Cloudflare deployment
 
@@ -116,6 +146,8 @@ This verifies formatting, linting, TypeScript, tests, and production builds.
 - Local credentials belong in ignored `.dev.vars` files.
 - Service-token plaintext is displayed once; D1 stores only its SHA-256 hash and non-secret metadata.
 - Asset previews are authenticated and served with a restrictive sandbox policy.
+- Draft request comments are excluded from every service-token work query until explicitly submitted.
+- Claim ownership is bound to the authenticated token ID, and revoked or expired tokens fail authentication on every operation.
 
 ## Project scope
 

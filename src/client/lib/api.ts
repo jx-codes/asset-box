@@ -19,6 +19,15 @@ import {
   TagSchema,
   type TagInput,
 } from "@/shared/domain"
+import {
+  type WorkCommentInput,
+  WorkCommentInputSchema,
+  WorkCommentSchema,
+  type WorkRequestCreateInput,
+  WorkRequestCreateInputSchema,
+  WorkRequestListSchema,
+  WorkRequestSchema,
+} from "@/shared/work-requests"
 
 export class ApiRequestError extends errore.createTaggedError({
   name: "ApiRequestError",
@@ -89,6 +98,40 @@ export const api = {
   logout: () => requestJson({ path: "/api/logout", method: "POST", schema: SessionSchema }),
   library: (view: LibraryView) =>
     requestJson({ path: `/api/library?view=${view}`, schema: LibrarySchema }),
+  workRequests: (target: { tag: "asset-edit"; parentAssetId: string } | { tag: "new-asset" }) =>
+    requestJson({
+      path:
+        target.tag === "asset-edit"
+          ? `/api/work-requests?parentAssetId=${encodeURIComponent(target.parentAssetId)}`
+          : "/api/work-requests?kind=new",
+      schema: WorkRequestListSchema,
+    }),
+  createWorkRequest: (input: WorkRequestCreateInput) =>
+    requestJson({
+      path: "/api/work-requests",
+      method: "POST",
+      body: WorkRequestCreateInputSchema.parse(input),
+      schema: WorkRequestSchema,
+    }),
+  addDraftComment: ({ requestId, input }: { requestId: string; input: WorkCommentInput }) =>
+    requestJson({
+      path: `/api/work-requests/${requestId}/comments`,
+      method: "POST",
+      body: WorkCommentInputSchema.parse(input),
+      schema: WorkCommentSchema,
+    }),
+  submitComment: ({ requestId, commentId }: { requestId: string; commentId: string }) =>
+    requestJson({
+      path: `/api/work-requests/${requestId}/comments/${commentId}/submit`,
+      method: "POST",
+      schema: WorkCommentSchema,
+    }),
+  submitAllComments: (requestId: string) =>
+    requestJson({
+      path: `/api/work-requests/${requestId}/comments/submit-all`,
+      method: "POST",
+      schema: WorkRequestSchema,
+    }),
   serviceTokens: () => requestJson({ path: "/api/service-tokens", schema: ServiceTokenListSchema }),
   createServiceToken: (input: ServiceTokenInput) =>
     requestJson({

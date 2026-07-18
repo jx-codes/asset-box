@@ -1,10 +1,8 @@
 import * as errore from "errore"
 import { OpenAPIHono, z } from "@hono/zod-openapi"
 import { Scalar } from "@scalar/hono-api-reference"
-import type { Context } from "hono"
 import { deleteCookie, setCookie } from "hono/cookie"
 import {
-  ApiErrorSchema,
   AssetIdSchema,
   AssetLifecycleInputSchema,
   AssetSchema,
@@ -22,7 +20,6 @@ import {
   TagSlugSchema,
   UploadResponseSchema,
 } from "@/shared/domain"
-import type { AssetEvent } from "@/shared/events"
 import { deleteAsset } from "./assets/delete-service"
 import { uploadAsset } from "./assets/service"
 import { authorize, authorizeBrowserSession, checkPasswordAttempt } from "./auth/authorize"
@@ -43,17 +40,18 @@ import {
   listServiceTokens,
   revokeServiceToken,
 } from "./data/service-token-repository"
-import type { Env } from "./env"
+import { InternalFailureError, InvalidInputError, StorageFailureError } from "./errors"
 import {
-  InternalFailureError,
-  InvalidInputError,
-  StorageFailureError,
-  toErrorResponse,
-} from "./errors"
+  type AppContext,
+  commonErrorResponses,
+  jsonContent,
+  parseJsonInput,
+  respondError,
+} from "./http"
+import { notifyClients } from "./realtime"
+import { registerWorkRequestRoutes } from "./work-requests/routes"
 
 export { AssetBoxCoordinator }
-
-type AppContext = { Bindings: Env }
 
 const app = new OpenAPIHono<AppContext>()
 
@@ -63,58 +61,6 @@ const UploadFormSchema = z.object({
   blurb: z.string().trim().min(1).max(280),
   tags: z.string().default("[]"),
 })
-
-const jsonContent = <T extends z.ZodType>(schema: T, description: string) => ({
-  description,
-  content: { "application/json": { schema } },
-})
-
-const commonErrorResponses = {
-  400: jsonContent(ApiErrorSchema, "Invalid request"),
-  401: jsonContent(ApiErrorSchema, "Authentication required"),
-  404: jsonContent(ApiErrorSchema, "Resource not found"),
-  409: jsonContent(ApiErrorSchema, "Resource conflict"),
-  429: jsonContent(ApiErrorSchema, "Request throttled"),
-  500: jsonContent(ApiErrorSchema, "Storage or server failure"),
-} as const
-
-function respondError(c: Context<AppContext>, error: Error) {
-  const response = toErrorResponse(error)
-  return c.json(response.body, response.status, response.headers)
-}
-
-async function notifyClients({ c, event }: { c: Context<AppContext>; event: AssetEvent }) {
-  const coordinator = c.env.COORDINATOR.get(c.env.COORDINATOR.idFromName("events"))
-  const notified = await coordinator
-    .fetch("https://coordinator/broadcast", {
-      method: "POST",
-      body: JSON.stringify(event),
-    })
-    .catch((cause) => new InternalFailureError({ operation: "live update broadcast", cause }))
-  if (notified instanceof Error) {
-    console.warn("Committed change, but live update failed", notified)
-    return
-  }
-  if (!notified.ok) console.warn("Committed change, but live update returned", notified.status)
-}
-
-async function parseJsonInput<T>({
-  read,
-  schema,
-}: {
-  read: () => Promise<unknown>
-  schema: z.ZodType<T>
-}) {
-  const input = await read().catch(
-    (cause) => new InvalidInputError({ reason: "Request body is not valid JSON", cause }),
-  )
-  if (input instanceof Error) return input
-
-  return errore.try({
-    try: () => schema.parse(input),
-    catch: (cause) => new InvalidInputError({ reason: "Request body is invalid", cause }),
-  })
-}
 
 app.get("/api/session", async (c) => {
   const auth = await authorize(c)
@@ -396,6 +342,8 @@ app.openAPIRegistry.registerComponent("securitySchemes", "serviceToken", {
   description: "Use a service token created in the authenticated web interface.",
 })
 
+registerWorkRequestRoutes(app)
+
 const browserSessionSecurity: Record<string, string[]>[] = [{ sessionCookie: [] }]
 
 const protectedSecurity: Record<string, string[]>[] = [
@@ -550,7 +498,8 @@ app.doc("/api/openapi.json", {
   info: {
     title: "Asset Box API",
     version: "0.1.0",
-    description: "Upload hash-addressed HTML assets and manage agent guidance tags.",
+    description:
+      "Manage content-addressed HTML assets, durable work requests, agent claims, and immutable result revisions.",
   },
 })
 
