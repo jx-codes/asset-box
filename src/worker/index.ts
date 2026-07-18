@@ -482,11 +482,6 @@ app.openAPIRegistry.registerPath({
   responses: { ...commonErrorResponses, 204: { description: "Asset deleted" } },
 })
 
-app.use("/api/openapi.json", async (c, next) => {
-  const auth = await authorize(c)
-  if (auth instanceof Error) return respondError(c, auth)
-  return next()
-})
 app.use("/api/docs", async (c, next) => {
   const auth = await authorize(c)
   if (auth instanceof Error) return respondError(c, auth)
