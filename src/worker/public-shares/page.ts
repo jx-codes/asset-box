@@ -57,7 +57,7 @@ export function publicSharePage({
     <a href="/share/${encodedToken}/download" download>Download HTML</a>
   </header>
   <main>
-    <iframe src="/share/${encodedToken}/content" title="${escapeHtml(title)}" sandbox="allow-scripts"></iframe>
+    <iframe src="/share/${encodedToken}/content/" title="${escapeHtml(title)}" sandbox="allow-scripts"></iframe>
   </main>
 </body>
 </html>`

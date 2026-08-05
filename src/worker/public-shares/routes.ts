@@ -1,5 +1,6 @@
 import { type OpenAPIHono, z } from "@hono/zod-openapi"
 import { AssetIdSchema } from "@/shared/domain"
+import { ASSET_ENTRY_PATH, resolveAssetRequestPath } from "../assets/resource"
 import {
   PublicShareCreateInputSchema,
   PublicShareCreatedSchema,
@@ -87,6 +88,24 @@ export function registerPublicShareRoutes(app: OpenAPIHono<AppContext>) {
       cacheControl: "no-store, private",
       disposition: "inline",
       filename: `${content.target.asset_id}.html`,
+    })
+  })
+
+  app.get("/share/:token/content/*", async (c) => {
+    const path = resolveAssetRequestPath(c.req.param("*"))
+    if (path instanceof Error) return publicShareUnavailableResponse()
+    const content = await readPublicShareContent({
+      env: c.env,
+      token: c.req.param("token"),
+      now: new Date(),
+      source: { tag: "file", path },
+    })
+    if (content instanceof Error) return publicRouteError(content)
+    return assetHtmlResponse({
+      body: content.object.body,
+      cacheControl: "no-store, private",
+      disposition: "inline",
+      filename: path.split("/").at(-1) ?? ASSET_ENTRY_PATH,
     })
   })
 

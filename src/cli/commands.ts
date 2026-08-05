@@ -2,7 +2,7 @@ import * as errore from "errore"
 import fs from "node:fs"
 import path from "node:path"
 import { z } from "zod"
-import { ApiErrorSchema, UploadResponseSchema } from "@/shared/domain"
+import { ApiErrorSchema, AssetFilePathSchema, UploadResponseSchema } from "@/shared/domain"
 import {
   AgentWorkListSchema,
   AgentWorkTargetSchema,
@@ -42,6 +42,7 @@ const PullManifestSchema = z.object({
       tag: z.literal("html"),
       assetId: z.string().regex(/^[a-f0-9]{64}$/),
       file: z.literal("source.html"),
+      files: z.array(z.object({ path: AssetFilePathSchema, file: z.string().min(1) })).optional(),
     }),
   ]),
 })
@@ -110,15 +111,61 @@ async function requestJson<T>({
   return parsed.data
 }
 
+async function readLocalHtmlContent({ input, operation }: { input: string; operation: string }) {
+  const absoluteInput = path.resolve(input)
+  const stats = await fs.promises
+    .stat(absoluteInput)
+    .catch((cause) => new CliFileError({ operation: "inspect", file: absoluteInput, cause }))
+  if (stats instanceof Error) return stats
+  if (stats.isFile()) {
+    const bytes = await fs.promises
+      .readFile(absoluteInput)
+      .catch((cause) => new CliFileError({ operation, file: absoluteInput, cause }))
+    if (bytes instanceof Error) return bytes
+    return { tag: "legacy-html" as const, file: absoluteInput, bytes }
+  }
+  if (!stats.isDirectory()) {
+    return new CliFileError({ operation: "read HTML from", file: absoluteInput })
+  }
+
+  const entries = await fs.promises
+    .readdir(absoluteInput, { recursive: true })
+    .catch((cause) => new CliFileError({ operation: "list", file: absoluteInput, cause }))
+  if (entries instanceof Error) return entries
+  const htmlPaths = entries
+    .filter((entry) => entry.toLowerCase().endsWith(".html"))
+    .map((entry) => entry.split(path.sep).join("/"))
+    .sort()
+  const files: Array<{ path: string; file: string; bytes: Uint8Array }> = []
+  for (const filePath of htmlPaths) {
+    const parsedPath = AssetFilePathSchema.safeParse(filePath)
+    if (!parsedPath.success) {
+      return new CliFileError({ operation: "validate path in", file: absoluteInput })
+    }
+    const absoluteFile = path.join(absoluteInput, filePath)
+    const bytes = await fs.promises
+      .readFile(absoluteFile)
+      .catch((cause) => new CliFileError({ operation, file: absoluteFile, cause }))
+    if (bytes instanceof Error) return bytes
+    files.push({ path: parsedPath.data, file: absoluteFile, bytes })
+  }
+  return { tag: "html-files" as const, files }
+}
+
 export async function uploadAssetFile(args: UploadArguments) {
-  const absoluteFile = path.resolve(args.file)
-  const html = await fs.promises
-    .readFile(absoluteFile)
-    .catch((cause) => new CliFileError({ operation: "read", file: absoluteFile, cause }))
-  if (html instanceof Error) return html
+  const content = await readLocalHtmlContent({ input: args.file, operation: "read" })
+  if (content instanceof Error) return content
 
   const form = new FormData()
-  form.set("html", new File([html], path.basename(absoluteFile), { type: "text/html" }))
+  if (content.tag === "legacy-html") {
+    form.set("html", new File([content.bytes], path.basename(content.file), { type: "text/html" }))
+  }
+  if (content.tag === "html-files") {
+    for (const file of content.files) {
+      form.append("files", new File([file.bytes], path.basename(file.file), { type: "text/html" }))
+    }
+    form.set("filePaths", JSON.stringify(content.files.map((file) => file.path)))
+  }
   form.set("title", args.title)
   form.set("blurb", args.blurb)
   form.set("tags", JSON.stringify(args.tags))
@@ -191,6 +238,27 @@ export async function pullWorkRequest(args: PullArguments) {
       .writeFile(sourceFile, context.source.html, { flag: "wx" })
       .catch((cause) => new CliFileError({ operation: "write", file: sourceFile, cause }))
     if (written instanceof Error) return written
+    if (context.source.files !== undefined) {
+      const sourceDirectory = path.join(directory, "source")
+      for (const source of context.source.files) {
+        const sourcePath = path.join(sourceDirectory, source.path)
+        const parentCreated = await fs.promises
+          .mkdir(path.dirname(sourcePath), { recursive: true })
+          .catch(
+            (cause) =>
+              new CliFileError({
+                operation: "create directory",
+                file: path.dirname(sourcePath),
+                cause,
+              }),
+          )
+        if (parentCreated instanceof Error) return parentCreated
+        const sourceWritten = await fs.promises
+          .writeFile(sourcePath, source.html, { flag: "wx" })
+          .catch((cause) => new CliFileError({ operation: "write", file: sourcePath, cause }))
+        if (sourceWritten instanceof Error) return sourceWritten
+      }
+    }
   }
 
   const manifest = PullManifestSchema.parse({
@@ -202,7 +270,19 @@ export async function pullWorkRequest(args: PullArguments) {
     source:
       context.source.tag === "none"
         ? { tag: "none" }
-        : { tag: "html", assetId: context.source.assetId, file: "source.html" },
+        : {
+            tag: "html",
+            assetId: context.source.assetId,
+            file: "source.html",
+            ...(context.source.files === undefined
+              ? {}
+              : {
+                  files: context.source.files.map((source) => ({
+                    path: source.path,
+                    file: `source/${source.path}`,
+                  })),
+                }),
+          },
   })
   const manifestFile = path.join(directory, "request.json")
   const written = await fs.promises
@@ -233,15 +313,27 @@ export async function pushWorkRequestResult(args: PushArguments) {
   if (workspace instanceof Error) return workspace
   const { directory, manifestFile, manifest } = workspace
 
-  const htmlFile = path.resolve(directory, args.html)
-  const html = await fs.promises
-    .readFile(htmlFile, "utf8")
-    .catch((cause) => new CliFileError({ operation: "read", file: htmlFile, cause }))
-  if (html instanceof Error) return html
+  const content = await readLocalHtmlContent({
+    input: path.resolve(directory, args.html),
+    operation: "read",
+  })
+  if (content instanceof Error) return content
+  const documents =
+    content.tag === "legacy-html"
+      ? { html: new TextDecoder().decode(content.bytes) }
+      : {
+          html: new TextDecoder().decode(
+            content.files.find((file) => file.path === "index.html")?.bytes ?? new Uint8Array(),
+          ),
+          files: content.files.map((file) => ({
+            path: file.path,
+            html: new TextDecoder().decode(file.bytes),
+          })),
+        }
 
   const input = WorkResultPushInputSchema.safeParse({
     idempotencyKey: manifest.claim.resultIdempotencyKey,
-    html,
+    ...documents,
     title: args.title ?? manifest.target.title,
     blurb: args.blurb ?? manifest.target.blurb,
     tagSlugs: args.tags,

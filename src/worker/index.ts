@@ -4,6 +4,7 @@ import { Scalar } from "@scalar/hono-api-reference"
 import { deleteCookie, setCookie } from "hono/cookie"
 import {
   AssetIdSchema,
+  AssetFilePathSchema,
   AssetLifecycleInputSchema,
   AssetSchema,
   AssetTagInputSchema,
@@ -23,6 +24,7 @@ import {
 import { deleteAsset } from "./assets/delete-service"
 import { assetHtmlResponse } from "./assets/response"
 import { uploadAsset } from "./assets/service"
+import { ASSET_ENTRY_PATH, resolveAssetRequestPath } from "./assets/resource"
 import { authorize, authorizeBrowserSession, checkPasswordAttempt } from "./auth/authorize"
 import { createSessionToken, sessionCookieOptions } from "./auth/session"
 import { createServiceTokenMaterial } from "./auth/service-token"
@@ -30,6 +32,7 @@ import { AssetBoxCoordinator } from "./coordinator"
 import {
   createTag,
   deleteTag,
+  findAssetFile,
   getLibrary,
   replaceAssetTags,
   requireAsset,
@@ -57,12 +60,43 @@ export { AssetBoxCoordinator }
 
 const app = new OpenAPIHono<AppContext>()
 
-const UploadFormSchema = z.object({
-  html: z.instanceof(File).openapi({ type: "string", format: "binary" }),
+const UploadMetadataFormSchema = z.object({
   title: z.string().trim().min(1).max(120),
   blurb: z.string().trim().min(1).max(280),
   tags: z.string().default("[]"),
+  filePaths: z.string().optional(),
 })
+
+function parseUploadContent(form: FormData, filePathsJson: string | undefined) {
+  const legacyHtml = form.get("html")
+  const files = form.getAll("files")
+  if (legacyHtml instanceof File && files.length === 0) {
+    return { tag: "legacy-html" as const, file: legacyHtml }
+  }
+  if (legacyHtml !== null || files.length === 0 || filePathsJson === undefined) {
+    return new InvalidInputError({
+      reason: "Provide either one html file or files with a matching filePaths JSON array",
+    })
+  }
+  if (!files.every((file) => file instanceof File)) {
+    return new InvalidInputError({ reason: "Every files value must be an HTML file" })
+  }
+  const filePaths = errore.try({
+    try: () => z.array(AssetFilePathSchema).parse(JSON.parse(filePathsJson)),
+    catch: (cause) =>
+      new InvalidInputError({ reason: "filePaths must be a JSON array of safe HTML paths", cause }),
+  })
+  if (filePaths instanceof Error) return filePaths
+  if (filePaths.length !== files.length) {
+    return new InvalidInputError({
+      reason: "filePaths must contain one path for every files value",
+    })
+  }
+  return {
+    tag: "html-files" as const,
+    files: files.map((file, index) => ({ path: filePaths[index] ?? "", file })),
+  }
+}
 
 app.get("/api/session", async (c) => {
   const auth = await authorize(c)
@@ -202,7 +236,7 @@ app.post("/api/assets", async (c) => {
     .formData()
     .catch((cause) => new InvalidInputError({ reason: "Upload form is invalid", cause }))
   if (rawForm instanceof Error) return respondError(c, rawForm)
-  const form = UploadFormSchema.safeParse(Object.fromEntries(rawForm))
+  const form = UploadMetadataFormSchema.safeParse(Object.fromEntries(rawForm))
   if (!form.success) {
     return respondError(
       c,
@@ -216,11 +250,13 @@ app.post("/api/assets", async (c) => {
       new InvalidInputError({ reason: "Tags must be a JSON array of tag slugs", cause }),
   })
   if (tagSlugs instanceof Error) return respondError(c, tagSlugs)
+  const content = parseUploadContent(rawForm, form.data.filePaths)
+  if (content instanceof Error) return respondError(c, content)
 
   const result = await uploadAsset({
     env: c.env,
     input: {
-      file: form.data.html,
+      content,
       title: form.data.title,
       blurb: form.data.blurb,
       tagSlugs,
@@ -304,20 +340,67 @@ app.get("/view/:id", async (c) => {
   }
   const metadata = await requireAsset({ db: c.env.ASSET_BOX_DB, id: id.data })
   if (metadata instanceof Error) return respondError(c, metadata)
-
-  const object = await c.env.ASSET_BOX_BUCKET.get(`assets/${id.data}.html`).catch(
+  const file = await findAssetFile({
+    db: c.env.ASSET_BOX_DB,
+    assetId: id.data,
+    path: ASSET_ENTRY_PATH,
+  })
+  if (file instanceof Error) return respondError(c, file)
+  if (file.tag === "missing") {
+    return c.json(
+      { error: { code: "ASSET_NOT_FOUND" as const, message: "Asset file not found" } },
+      404,
+    )
+  }
+  if (file.value.object_key !== `assets/${id.data}.html`) {
+    return c.redirect(`/view/${id.data}/`, 308)
+  }
+  const object = await c.env.ASSET_BOX_BUCKET.get(file.value.object_key).catch(
     (cause) => new StorageFailureError({ operation: "asset read", cause }),
   )
   if (object instanceof Error) return respondError(c, object)
   if (object === null) {
     return respondError(c, new StorageFailureError({ operation: "asset read" }))
   }
-
   return assetHtmlResponse({
     body: object.body,
     cacheControl: "private, max-age=3600",
     disposition: "inline",
     filename: `${id.data}.html`,
+  })
+})
+
+app.get("/view/:id/*", async (c) => {
+  const auth = await authorize(c)
+  if (auth instanceof Error) return respondError(c, auth)
+  const id = AssetIdSchema.safeParse(c.req.param("id"))
+  if (!id.success) {
+    return respondError(c, new InvalidInputError({ reason: "Asset id is invalid" }))
+  }
+  const path = resolveAssetRequestPath(c.req.param("*"))
+  if (path instanceof Error) return respondError(c, path)
+  const metadata = await requireAsset({ db: c.env.ASSET_BOX_DB, id: id.data })
+  if (metadata instanceof Error) return respondError(c, metadata)
+  const file = await findAssetFile({ db: c.env.ASSET_BOX_DB, assetId: id.data, path })
+  if (file instanceof Error) return respondError(c, file)
+  if (file.tag === "missing") {
+    return c.json(
+      { error: { code: "ASSET_NOT_FOUND" as const, message: "Asset file not found" } },
+      404,
+    )
+  }
+  const object = await c.env.ASSET_BOX_BUCKET.get(file.value.object_key).catch(
+    (cause) => new StorageFailureError({ operation: "asset file read", cause }),
+  )
+  if (object instanceof Error) return respondError(c, object)
+  if (object === null) {
+    return respondError(c, new StorageFailureError({ operation: "asset file read" }))
+  }
+  return assetHtmlResponse({
+    body: object.body,
+    cacheControl: "private, max-age=3600",
+    disposition: "inline",
+    filename: path.split("/").at(-1) ?? ASSET_ENTRY_PATH,
   })
 })
 
@@ -441,7 +524,18 @@ app.openAPIRegistry.registerPath({
   tags: ["Assets"],
   security: protectedSecurity,
   request: {
-    body: { content: { "multipart/form-data": { schema: UploadFormSchema } } },
+    body: {
+      content: {
+        "multipart/form-data": {
+          schema: UploadMetadataFormSchema.extend({
+            html: z.instanceof(File).optional().openapi({ type: "string", format: "binary" }),
+            files: z
+              .array(z.instanceof(File).openapi({ type: "string", format: "binary" }))
+              .optional(),
+          }),
+        },
+      },
+    },
   },
   responses: {
     ...commonErrorResponses,

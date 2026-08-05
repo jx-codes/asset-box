@@ -20,6 +20,18 @@ function fakeDatabase() {
       }
       return { linked: 1 }
     },
+    all: async () => ({
+      success: true,
+      results: [
+        {
+          asset_id: "a".repeat(64),
+          path: "index.html",
+          object_key: `assets/${"a".repeat(64)}.html`,
+          size_bytes: 1024,
+          content_sha256: "a".repeat(64),
+        },
+      ],
+    }),
     run: async () => ({ success: true, meta: { changes: 1 } }),
   }
   const db = {
@@ -41,7 +53,10 @@ describe("asset deletion", () => {
       now: new Date("2026-07-18T11:00:00.000Z"),
     })
 
-    expect(result).toEqual({ tag: "deleting", objectKey: `assets/${"a".repeat(64)}.html` })
+    expect(result).toEqual({
+      tag: "deleting",
+      objectKeys: [`assets/${"a".repeat(64)}.html`],
+    })
     expect(sql.some((query) => query.includes("work_requests"))).toBe(false)
     expect(sql.some((query) => query.includes("UPDATE assets SET deleted_at"))).toBe(true)
   })

@@ -178,9 +178,9 @@ export function usage() {
   return [
     "Usage:",
     "  ASSET_BOX_URL=https://box.example.com ASSET_BOX_SERVICE_TOKEN=abx_... \\",
-    '    bun run asset-box upload ./asset.html --title "Title" --blurb "Description" --tags demo',
+    '    bun run asset-box upload ./asset.html-or-directory --title "Title" --blurb "Description" --tags demo',
     "  bun run asset-box pull [request-id] --out ./asset-box-work --lease-seconds 900",
-    '  bun run asset-box push ./asset-box-work --html result.html --title "Result" --blurb "Description" --tags demo',
+    '  bun run asset-box push ./asset-box-work --html result.html-or-directory --title "Result" --blurb "Description" --tags demo',
     '  bun run asset-box fail ./asset-box-work --reason "Failure details"',
   ].join("\n")
 }

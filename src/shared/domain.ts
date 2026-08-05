@@ -31,6 +31,21 @@ export const AssetIdSchema = z
   .regex(/^[a-f0-9]{64}$/, "Expected a SHA-256 asset identifier")
   .openapi("AssetId")
 
+export const AssetFilePathSchema = z
+  .string()
+  .min(1)
+  .max(240)
+  .refine((path) => !path.startsWith("/"), "File paths must be relative")
+  .refine((path) => !path.includes("\\"), "File paths must use forward slashes")
+  .refine((path) => !path.includes("?") && !path.includes("#"), "File paths cannot contain ? or #")
+  .refine(
+    (path) =>
+      path.split("/").every((segment) => segment.length > 0 && segment !== "." && segment !== ".."),
+    "File paths cannot contain empty, current-directory, or parent-directory segments",
+  )
+  .refine((path) => path.toLowerCase().endsWith(".html"), "Every asset file must be HTML")
+  .openapi("AssetFilePath")
+
 export const AssetLifecycleSchema = z
   .discriminatedUnion("tag", [
     z.object({ tag: z.literal("active") }),
@@ -182,6 +197,7 @@ export type AssetTagInput = z.infer<typeof AssetTagInputSchema>
 export type ApiErrorCode = z.infer<typeof ApiErrorCodeSchema>
 export type ApiErrorPayload = z.infer<typeof ApiErrorSchema>
 export type Asset = z.infer<typeof AssetSchema>
+export type AssetFilePath = z.infer<typeof AssetFilePathSchema>
 export type Library = z.infer<typeof LibrarySchema>
 export type LibraryView = z.infer<typeof LibraryViewSchema>
 export type LoginInput = z.infer<typeof LoginInputSchema>

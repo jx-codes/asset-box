@@ -60,6 +60,37 @@ describe("work request contracts", () => {
     expect("html" in context.source).toBe(false)
   })
 
+  it("adds complete multi-page sources without removing legacy entry HTML", () => {
+    const context = WorkPullContextSchema.parse({
+      claim,
+      target: {
+        tag: "asset-edit",
+        parentAssetId: "a".repeat(64),
+        title: "Guide",
+        blurb: "A multi-page guide.",
+      },
+      comments: [
+        {
+          id: claim.commentIds[0],
+          body: "Add setup instructions.",
+          submittedAt: "2026-07-18T09:05:00.000Z",
+        },
+      ],
+      source: {
+        tag: "html",
+        assetId: "a".repeat(64),
+        html: "<!doctype html><html><body>Home</body></html>",
+        files: [
+          { path: "index.html", html: "<!doctype html><html><body>Home</body></html>" },
+          { path: "guides/setup.html", html: "<!doctype html><html><body>Setup</body></html>" },
+        ],
+      },
+    })
+
+    expect(context.source.tag).toBe("html")
+    if (context.source.tag === "html") expect(context.source.files).toHaveLength(2)
+  })
+
   it("represents a reported failure as a terminal claim state with a bounded reason", () => {
     const input = WorkClaimFailureInputSchema.safeParse({ reason: "Renderer exited with code 1." })
     const failure = WorkClaimFailureSchema.safeParse({
@@ -93,6 +124,31 @@ describe("work request contracts", () => {
 
     expect(valid.success).toBe(true)
     expect(missingKey.success).toBe(false)
+  })
+
+  it("accepts additive multi-page result files while preserving single-page pushes", () => {
+    const multiPage = WorkResultPushInputSchema.safeParse({
+      idempotencyKey: claim.resultIdempotencyKey,
+      html: "<!doctype html><html><body>Home</body></html>",
+      files: [
+        { path: "index.html", html: "<!doctype html><html><body>Home</body></html>" },
+        { path: "details.html", html: "<!doctype html><html><body>Details</body></html>" },
+      ],
+      title: "Result",
+      blurb: "Completed multi-page result.",
+      tagSlugs: [],
+    })
+    const unsafePath = WorkResultPushInputSchema.safeParse({
+      idempotencyKey: claim.resultIdempotencyKey,
+      html: "<!doctype html><html><body>Home</body></html>",
+      files: [{ path: "../escape.html", html: "<!doctype html><html></html>" }],
+      title: "Result",
+      blurb: "Invalid result.",
+      tagSlugs: [],
+    })
+
+    expect(multiPage.success).toBe(true)
+    expect(unsafePath.success).toBe(false)
   })
 
   it("makes parent presence explicit at request creation", () => {

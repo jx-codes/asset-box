@@ -1,10 +1,10 @@
 # Asset Box
 
-Asset Box is a single-user Cloudflare application for uploading, organizing, reviewing, and revising self-contained HTML assets. It provides a password-protected web library plus revocable service-token workflows for CLIs and agents.
+Asset Box is a single-user Cloudflare application for uploading, organizing, reviewing, and revising content-addressed HTML resources. A resource can be one self-contained HTML document or a multi-page set of HTML files rooted at `index.html`. It provides a password-protected web library plus revocable service-token workflows for CLIs and agents.
 
 ## Features
 
-- Content-addressed HTML uploads with SHA-256 duplicate detection
+- Content-addressed single-page and multi-page HTML uploads with SHA-256 duplicate detection
 - D1 metadata and R2 object storage
 - Active and archived asset views
 - Tag definitions with agent-facing guidance
@@ -76,7 +76,18 @@ bun run asset-box upload ./page.html \
   --tags landing-page,launch
 ```
 
-Pull the oldest available submitted request, atomically claim its current submitted-comment snapshot, and materialize `request.json` plus `source.html` when the request edits an existing asset:
+Upload a multi-page resource by passing a directory. The directory must contain `index.html`; nested HTML paths and relative links are preserved under the same asset URL:
+
+```sh
+bun run asset-box upload ./site \
+  --title "Product guide" \
+  --blurb "Multi-page product documentation" \
+  --tags documentation,product
+```
+
+A resource may contain up to 50 HTML files and 5 MB total. Every file must be a complete HTML document.
+
+Pulling an asset-edit request materializes `source.html` for existing clients and also writes the complete source file set under `source/` when the asset is multi-page:
 
 ```sh
 bun run asset-box pull --out ./asset-box-work --lease-seconds 900
@@ -84,7 +95,7 @@ bun run asset-box pull --out ./asset-box-work --lease-seconds 900
 bun run asset-box pull 9a232244-4e6b-4592-ad15-6ca4e2a0e45f --out ./asset-box-work
 ```
 
-Create a complete result document at `./asset-box-work/result.html`, then push it with metadata:
+Create a complete result document at `./asset-box-work/result.html`, or create a multi-page result directory rooted at `index.html`, then push it with metadata:
 
 ```sh
 bun run asset-box push ./asset-box-work \
@@ -94,7 +105,17 @@ bun run asset-box push ./asset-box-work \
   --tags landing-page,launch
 ```
 
-`request.json` carries the claim's server-issued idempotency key. Repeating the same push returns the original result instead of creating a second revision. New-asset requests omit `source.html`. Tag slugs must already exist in the web interface.
+For a multi-page result:
+
+```sh
+bun run asset-box push ./asset-box-work \
+  --html result \
+  --title "Updated product guide" \
+  --blurb "Multi-page revision implementing the submitted feedback" \
+  --tags documentation,product
+```
+
+`request.json` carries the claim's server-issued idempotency key. Repeating the same push returns the original result instead of creating a second revision. New-asset requests omit source files. Tag slugs must already exist in the web interface.
 
 ## API
 
@@ -104,8 +125,8 @@ After signing in, open `/api/docs` for the Scalar API reference or fetch `/api/o
 - Agent and CLI requests authenticate with `Authorization: Bearer <service-token>`.
 - Service-token creation, listing, and revocation require a browser-authenticated session.
 - Browser-only work-request routes create requests, queue private drafts, and explicitly submit one or all drafts.
-- Service-token agent routes list submitted work, claim a snapshot, pull context/source HTML, and push a full result document.
-- Result HTML is stored under its SHA-256 asset ID; the parent object and parent asset row are never overwritten.
+- Service-token agent routes list submitted work, claim a snapshot, pull the complete source resource, and push a complete single-page or multi-page result.
+- Asset files are stored under an immutable SHA-256 resource ID; the parent resource and parent asset row are never overwritten.
 - D1 is canonical for comments, claims, snapshots, and lineage. Durable Object events only prompt subscribers to refetch.
 
 ## Cloudflare deployment

@@ -511,9 +511,9 @@ describe("work request repository invariants", () => {
         return statement(sql, captured, { first, all })
       },
       batch: async (_statements: D1PreparedStatement[]) => {
-        batched.push(...captured.slice(-5))
+        batched.push(...captured.slice(-6))
         committed = true
-        return Array.from({ length: 5 }, () => ({
+        return Array.from({ length: 6 }, () => ({
           success: true,
           meta: { changes: 1 },
         })) as D1Result[]
@@ -526,6 +526,15 @@ describe("work request repository invariants", () => {
       principalId,
       idempotencyKey: claim.resultIdempotencyKey,
       asset,
+      entryObjectKey: `assets/${assetId}.html`,
+      files: [
+        {
+          path: "index.html",
+          objectKey: `assets/${assetId}.html`,
+          sizeBytes: asset.sizeBytes,
+          contentSha256: assetId,
+        },
+      ],
       parentAssetId,
       tagSlugs: [],
       now,

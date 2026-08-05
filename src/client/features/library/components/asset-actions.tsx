@@ -176,7 +176,7 @@ export function AssetActions({ asset, tags }: { asset: Asset; tags: Tag[] }) {
           <DialogHeader>
             <DialogTitle>Delete this asset?</DialogTitle>
             <DialogDescription>
-              “{asset.title}” and its stored HTML will be permanently deleted. This cannot be
+              “{asset.title}” and its stored HTML files will be permanently deleted. This cannot be
               undone.
             </DialogDescription>
           </DialogHeader>

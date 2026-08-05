@@ -1,5 +1,5 @@
 import { z } from "@hono/zod-openapi"
-import { AssetIdSchema, AssetSchema, TagSlugSchema } from "./domain"
+import { AssetFilePathSchema, AssetIdSchema, AssetSchema, TagSlugSchema } from "./domain"
 
 export const WorkRequestIdSchema = z.string().uuid().openapi("WorkRequestId")
 export const WorkCommentIdSchema = z.string().uuid().openapi("WorkCommentId")
@@ -216,10 +216,24 @@ export const AgentWorkListSchema = z
   .object({ requests: z.array(AgentWorkSummarySchema) })
   .openapi("AgentWorkList")
 
+const HtmlDocumentSchema = z
+  .string()
+  .min(1)
+  .max(5 * 1024 * 1024)
+
+export const AssetHtmlFileSchema = z
+  .object({ path: AssetFilePathSchema, html: HtmlDocumentSchema })
+  .openapi("AssetHtmlFile")
+
 export const WorkSourceSchema = z
   .discriminatedUnion("tag", [
     z.object({ tag: z.literal("none") }),
-    z.object({ tag: z.literal("html"), assetId: AssetIdSchema, html: z.string().min(1) }),
+    z.object({
+      tag: z.literal("html"),
+      assetId: AssetIdSchema,
+      html: HtmlDocumentSchema,
+      files: z.array(AssetHtmlFileSchema).min(1).max(50).optional(),
+    }),
   ])
   .openapi("WorkSource")
 
@@ -235,10 +249,8 @@ export const WorkPullContextSchema = z
 export const WorkResultPushInputSchema = z
   .object({
     idempotencyKey: z.string().uuid(),
-    html: z
-      .string()
-      .min(1)
-      .max(5 * 1024 * 1024),
+    html: HtmlDocumentSchema,
+    files: z.array(AssetHtmlFileSchema).min(1).max(50).optional(),
     title: z.string().trim().min(1).max(120),
     blurb: z.string().trim().min(1).max(280),
     tagSlugs: z.array(TagSlugSchema).max(50).default([]),

@@ -157,6 +157,8 @@ export async function commitWorkResult({
   principalId,
   idempotencyKey,
   asset,
+  entryObjectKey,
+  files,
   parentAssetId,
   tagSlugs,
   now,
@@ -166,6 +168,8 @@ export async function commitWorkResult({
   principalId: string
   idempotencyKey: string
   asset: Asset
+  entryObjectKey: string
+  files: Array<{ path: string; objectKey: string; sizeBytes: number; contentSha256: string }>
   parentAssetId: string | null
   tagSlugs: string[]
   now: Date
@@ -218,13 +222,35 @@ export async function commitWorkResult({
         storedAsset.id,
         storedAsset.title,
         storedAsset.blurb,
-        `assets/${storedAsset.id}.html`,
+        entryObjectKey,
         storedAsset.sizeBytes,
         storedAsset.createdAt,
         claim.id,
         principalId,
         createdAt,
       ),
+    ...files.map((file) =>
+      db
+        .prepare(
+          `INSERT INTO asset_files
+            (asset_id, path, object_key, size_bytes, content_sha256)
+           SELECT ?, ?, ?, ?, ?
+           WHERE EXISTS (
+             SELECT 1 FROM work_claims
+             WHERE id = ? AND service_token_id = ? AND completed_at = ?
+           )`,
+        )
+        .bind(
+          storedAsset.id,
+          file.path,
+          file.objectKey,
+          file.sizeBytes,
+          file.contentSha256,
+          claim.id,
+          principalId,
+          createdAt,
+        ),
+    ),
     ...tags.map((tag) =>
       db
         .prepare(

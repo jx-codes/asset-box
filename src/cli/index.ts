@@ -15,7 +15,7 @@ async function run(args: CliArguments) {
     console.log(
       `${result.status === "created" ? "Uploaded" : "Already exists"}: ${result.asset.title}`,
     )
-    console.log(`${args.url.replace(/\/$/, "")}/view/${result.asset.id}`)
+    console.log(`${args.url.replace(/\/$/, "")}/view/${result.asset.id}/`)
     return { tag: "completed" as const }
   }
 
@@ -43,7 +43,7 @@ async function run(args: CliArguments) {
   console.log(
     `${result.lifecycle.tag === "created" ? "Created" : "Replayed"}: ${result.asset.title}`,
   )
-  console.log(`${args.url.replace(/\/$/, "")}/view/${result.asset.id}`)
+  console.log(`${args.url.replace(/\/$/, "")}/view/${result.asset.id}/`)
   return { tag: "completed" as const }
 }
 

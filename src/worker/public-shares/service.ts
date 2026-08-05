@@ -1,5 +1,6 @@
 import type { Env } from "../env"
 import { PublicShareUnavailableError, StorageFailureError } from "../errors"
+import { findAssetFile } from "../data/repository"
 import {
   confirmPublicShareActive,
   findActivePublicShareTarget,
@@ -23,8 +24,28 @@ async function requirePublicShareTarget({
   return findActivePublicShareTarget({ db: env.ASSET_BOX_DB, tokenHash, now })
 }
 
-async function readSharedAsset({ env, target }: { env: Env; target: PublicShareTarget }) {
-  const object = await env.ASSET_BOX_BUCKET.get(target.object_key).catch(
+async function readSharedAsset({
+  env,
+  target,
+  source,
+}: {
+  env: Env
+  target: PublicShareTarget
+  source: { tag: "entry" } | { tag: "file"; path: string }
+}) {
+  const objectKey = await (async () => {
+    if (source.tag === "entry") return target.object_key
+    const file = await findAssetFile({
+      db: env.ASSET_BOX_DB,
+      assetId: target.asset_id,
+      path: source.path,
+    })
+    if (file instanceof Error) return file
+    if (file.tag === "missing") return new PublicShareUnavailableError()
+    return file.value.object_key
+  })()
+  if (objectKey instanceof Error) return objectKey
+  const object = await env.ASSET_BOX_BUCKET.get(objectKey).catch(
     (cause) => new StorageFailureError({ operation: "public share asset read", cause }),
   )
   if (object instanceof Error) return object
@@ -57,14 +78,16 @@ export async function readPublicShareContent({
   env,
   token,
   now,
+  source = { tag: "entry" },
 }: {
   env: Env
   token: string
   now: Date
+  source?: { tag: "entry" } | { tag: "file"; path: string }
 }) {
   const target = await requirePublicShareTarget({ env, token, now })
   if (target instanceof Error) return target
-  const object = await readSharedAsset({ env, target })
+  const object = await readSharedAsset({ env, target, source })
   if (object instanceof Error) return object
   const active = await confirmPublicShareActive({
     db: env.ASSET_BOX_DB,
@@ -86,7 +109,7 @@ export async function downloadPublicShare({
 }) {
   const target = await requirePublicShareTarget({ env, token, now })
   if (target instanceof Error) return target
-  const object = await readSharedAsset({ env, target })
+  const object = await readSharedAsset({ env, target, source: { tag: "entry" } })
   if (object instanceof Error) return object
 
   const recorded = await recordPublicShareAccess({

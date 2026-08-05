@@ -29,6 +29,14 @@ const AssetRowSchema = z.object({
   deleted_at: z.string().nullable(),
 })
 
+const AssetFileRowSchema = z.object({
+  asset_id: z.string(),
+  path: z.string(),
+  object_key: z.string(),
+  size_bytes: z.number().int().nonnegative(),
+  content_sha256: z.string(),
+})
+
 export type AssetStorageRecord = z.infer<typeof AssetRowSchema>
 
 const TagRowSchema = z.object({
@@ -216,6 +224,40 @@ export async function findAssetStorageRecord({ db, id }: { db: D1Database; id: s
   })
 }
 
+export async function listAssetFiles({ db, assetId }: { db: D1Database; assetId: string }) {
+  return readRows({
+    statement: db
+      .prepare(
+        `SELECT asset_id, path, object_key, size_bytes, content_sha256
+         FROM asset_files WHERE asset_id = ? ORDER BY path`,
+      )
+      .bind(assetId),
+    schema: AssetFileRowSchema,
+    operation: "asset file listing",
+  })
+}
+
+export async function findAssetFile({
+  db,
+  assetId,
+  path,
+}: {
+  db: D1Database
+  assetId: string
+  path: string
+}) {
+  return readFirst({
+    statement: db
+      .prepare(
+        `SELECT asset_id, path, object_key, size_bytes, content_sha256
+         FROM asset_files WHERE asset_id = ? AND path = ?`,
+      )
+      .bind(assetId, path),
+    schema: AssetFileRowSchema,
+    operation: "asset file lookup",
+  })
+}
+
 export async function requireTagsBySlugs({ db, slugs }: { db: D1Database; slugs: string[] }) {
   if (slugs.length === 0) return []
 
@@ -237,21 +279,33 @@ export async function requireTagsBySlugs({ db, slugs }: { db: D1Database; slugs:
   return tags
 }
 
-export async function insertAsset({ db, asset }: { db: D1Database; asset: Asset }) {
+export async function insertAsset({
+  db,
+  asset,
+  entryObjectKey,
+  files,
+}: {
+  db: D1Database
+  asset: Asset
+  entryObjectKey: string
+  files: Array<{ path: string; objectKey: string; sizeBytes: number; contentSha256: string }>
+}) {
   const statements = [
     db
       .prepare(
         `INSERT OR IGNORE INTO assets (id, title, blurb, object_key, size_bytes, created_at)
          VALUES (?, ?, ?, ?, ?, ?)`,
       )
-      .bind(
-        asset.id,
-        asset.title,
-        asset.blurb,
-        `assets/${asset.id}.html`,
-        asset.sizeBytes,
-        asset.createdAt,
-      ),
+      .bind(asset.id, asset.title, asset.blurb, entryObjectKey, asset.sizeBytes, asset.createdAt),
+    ...files.map((file) =>
+      db
+        .prepare(
+          `INSERT OR IGNORE INTO asset_files
+            (asset_id, path, object_key, size_bytes, content_sha256)
+           VALUES (?, ?, ?, ?, ?)`,
+        )
+        .bind(asset.id, file.path, file.objectKey, file.sizeBytes, file.contentSha256),
+    ),
     ...asset.tags.map((tag) =>
       db
         .prepare("INSERT OR IGNORE INTO asset_tags (asset_id, tag_id) VALUES (?, ?)")
@@ -334,6 +388,10 @@ export async function beginAssetDeletion({
   const record = await findAssetStorageRecord({ db, id })
   if (record instanceof Error) return record
   if (record.tag === "missing") return new AssetNotFoundError({ id })
+  const files = await listAssetFiles({ db, assetId: id })
+  if (files instanceof Error) return files
+  if (files.length === 0)
+    return new DatabaseFailureError({ operation: "asset deletion file listing" })
 
   const result = await db
     .prepare("UPDATE assets SET deleted_at = COALESCE(deleted_at, ?) WHERE id = ?")
@@ -342,7 +400,7 @@ export async function beginAssetDeletion({
     .catch((cause) => new DatabaseFailureError({ operation: "asset deletion start", cause }))
   if (result instanceof Error) return result
   if (!result.success) return new DatabaseFailureError({ operation: "asset deletion start" })
-  return { tag: "deleting" as const, objectKey: record.value.object_key }
+  return { tag: "deleting" as const, objectKeys: files.map((file) => file.object_key) }
 }
 
 async function findTagBySlug({ db, slug }: { db: D1Database; slug: string }) {
