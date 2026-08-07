@@ -10,7 +10,7 @@ import {
   LoginThrottledError,
 } from "../errors"
 import { AttemptResultSchema } from "../coordinator"
-import { verifySessionToken } from "./session"
+import { verifyAssetPreviewToken, verifySessionToken } from "./session"
 import { hashServiceToken, isServiceToken } from "./service-token"
 
 const BEARER_PREFIX = "Bearer "
@@ -124,4 +124,22 @@ export async function authorize(c: Context<{ Bindings: Env }>) {
   if (!authorization.startsWith(BEARER_PREFIX)) return new AuthRequiredError()
 
   return authorizeServiceToken({ c, token: authorization.slice(BEARER_PREFIX.length) })
+}
+
+export async function authorizeAssetView(c: Context<{ Bindings: Env }>, assetId: string) {
+  const authorization = await authorize(c)
+  if (!(authorization instanceof Error)) return authorization
+  if (!errore.findCause(authorization, AuthRequiredError)) return authorization
+
+  const previewToken = getCookie(c, "asset_box_preview")
+  if (!previewToken) return authorization
+  const verified = await verifyAssetPreviewToken({
+    token: previewToken,
+    assetId,
+    secret: c.env.SESSION_SECRET,
+    now: new Date(),
+  })
+  if (verified instanceof Error) return verified
+  if (!verified) return authorization
+  return { tag: "asset-preview" as const, assetId }
 }

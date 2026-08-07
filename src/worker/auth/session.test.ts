@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest"
-import { createSessionToken, verifySessionToken } from "./session"
+import {
+  assetPreviewCookieOptions,
+  createAssetPreviewToken,
+  createSessionToken,
+  verifyAssetPreviewToken,
+  verifySessionToken,
+} from "./session"
 
 const secret = "a-long-test-secret-that-is-not-used-in-production"
 
@@ -43,5 +49,56 @@ describe("session tokens", () => {
     })
 
     expect(verified).toBe(false)
+  })
+})
+
+describe("asset preview tokens", () => {
+  const assetId = "a".repeat(64)
+
+  it("authorizes nested requests only for the asset that established the preview", async () => {
+    const issuedAt = new Date("2026-08-07T12:00:00.000Z")
+    const token = await createAssetPreviewToken({ assetId, secret, now: issuedAt })
+    if (token instanceof Error) throw token
+
+    const matchingAsset = await verifyAssetPreviewToken({
+      token,
+      assetId,
+      secret,
+      now: new Date("2026-08-07T12:30:00.000Z"),
+    })
+    const differentAsset = await verifyAssetPreviewToken({
+      token,
+      assetId: "b".repeat(64),
+      secret,
+      now: new Date("2026-08-07T12:30:00.000Z"),
+    })
+
+    expect(matchingAsset).toBe(true)
+    expect(differentAsset).toBe(false)
+  })
+
+  it("expires the nested-preview capability after one hour", async () => {
+    const issuedAt = new Date("2026-08-07T12:00:00.000Z")
+    const token = await createAssetPreviewToken({ assetId, secret, now: issuedAt })
+    if (token instanceof Error) throw token
+
+    const verified = await verifyAssetPreviewToken({
+      token,
+      assetId,
+      secret,
+      now: new Date("2026-08-07T13:00:01.000Z"),
+    })
+
+    expect(verified).toBe(false)
+  })
+
+  it("uses a secure cross-site cookie scoped to one asset preview path", () => {
+    expect(assetPreviewCookieOptions(assetId)).toEqual({
+      httpOnly: true,
+      maxAge: 3600,
+      path: `/view/${assetId}/`,
+      sameSite: "None",
+      secure: true,
+    })
   })
 })

@@ -25,8 +25,18 @@ import { deleteAsset } from "./assets/delete-service"
 import { assetHtmlResponse } from "./assets/response"
 import { uploadAsset } from "./assets/service"
 import { ASSET_ENTRY_PATH, resolveAssetRequestPath } from "./assets/resource"
-import { authorize, authorizeBrowserSession, checkPasswordAttempt } from "./auth/authorize"
-import { createSessionToken, sessionCookieOptions } from "./auth/session"
+import {
+  authorize,
+  authorizeAssetView,
+  authorizeBrowserSession,
+  checkPasswordAttempt,
+} from "./auth/authorize"
+import {
+  assetPreviewCookieOptions,
+  createAssetPreviewToken,
+  createSessionToken,
+  sessionCookieOptions,
+} from "./auth/session"
 import { createServiceTokenMaterial } from "./auth/service-token"
 import { AssetBoxCoordinator } from "./coordinator"
 import {
@@ -353,6 +363,15 @@ app.get("/view/:id", async (c) => {
     )
   }
   if (file.value.object_key !== `assets/${id.data}.html`) {
+    if (auth.tag === "browser-session") {
+      const previewToken = await createAssetPreviewToken({
+        assetId: id.data,
+        secret: c.env.SESSION_SECRET,
+        now: new Date(),
+      })
+      if (previewToken instanceof Error) return respondError(c, previewToken)
+      setCookie(c, "asset_box_preview", previewToken, assetPreviewCookieOptions(id.data))
+    }
     return c.redirect(`/view/${id.data}/`, 308)
   }
   const object = await c.env.ASSET_BOX_BUCKET.get(file.value.object_key).catch(
@@ -371,13 +390,14 @@ app.get("/view/:id", async (c) => {
 })
 
 app.get("/view/:id/*", async (c) => {
-  const auth = await authorize(c)
-  if (auth instanceof Error) return respondError(c, auth)
   const id = AssetIdSchema.safeParse(c.req.param("id"))
   if (!id.success) {
     return respondError(c, new InvalidInputError({ reason: "Asset id is invalid" }))
   }
-  const path = resolveAssetRequestPath(c.req.param("*"))
+  const auth = await authorizeAssetView(c, id.data)
+  if (auth instanceof Error) return respondError(c, auth)
+  const requestedPath = c.req.param("*")
+  const path = resolveAssetRequestPath(requestedPath)
   if (path instanceof Error) return respondError(c, path)
   const metadata = await requireAsset({ db: c.env.ASSET_BOX_DB, id: id.data })
   if (metadata instanceof Error) return respondError(c, metadata)
@@ -396,12 +416,22 @@ app.get("/view/:id/*", async (c) => {
   if (object === null) {
     return respondError(c, new StorageFailureError({ operation: "asset file read" }))
   }
-  return assetHtmlResponse({
+  const response = assetHtmlResponse({
     body: object.body,
     cacheControl: "private, max-age=3600",
     disposition: "inline",
     filename: path.split("/").at(-1) ?? ASSET_ENTRY_PATH,
   })
+  if (requestedPath !== "" || auth.tag !== "browser-session") return response
+
+  const previewToken = await createAssetPreviewToken({
+    assetId: id.data,
+    secret: c.env.SESSION_SECRET,
+    now: new Date(),
+  })
+  if (previewToken instanceof Error) return respondError(c, previewToken)
+  setCookie(c, "asset_box_preview", previewToken, assetPreviewCookieOptions(id.data))
+  return c.newResponse(response.body, response)
 })
 
 app.get("/api/events", async (c) => {
