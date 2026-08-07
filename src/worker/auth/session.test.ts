@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest"
 import {
-  assetPreviewCookieOptions,
   createAssetPreviewToken,
   createSessionToken,
   verifyAssetPreviewToken,
@@ -90,15 +89,5 @@ describe("asset preview tokens", () => {
     })
 
     expect(verified).toBe(false)
-  })
-
-  it("uses a secure cross-site cookie scoped to one asset preview path", () => {
-    expect(assetPreviewCookieOptions(assetId)).toEqual({
-      httpOnly: true,
-      maxAge: 3600,
-      path: `/view/${assetId}/`,
-      sameSite: "None",
-      secure: true,
-    })
   })
 })

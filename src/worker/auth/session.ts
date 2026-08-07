@@ -175,13 +175,3 @@ export const sessionCookieOptions = {
   sameSite: "Strict" as const,
   secure: true,
 }
-
-export function assetPreviewCookieOptions(assetId: string) {
-  return {
-    httpOnly: true,
-    maxAge: ASSET_PREVIEW_LIFETIME_SECONDS,
-    path: `/view/${assetId}/`,
-    sameSite: "None" as const,
-    secure: true,
-  }
-}

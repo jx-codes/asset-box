@@ -22,30 +22,17 @@ import {
   UploadResponseSchema,
 } from "@/shared/domain"
 import { deleteAsset } from "./assets/delete-service"
-import { assetHtmlResponse } from "./assets/response"
+import { registerAssetViewRoutes } from "./assets/routes"
 import { uploadAsset } from "./assets/service"
-import { ASSET_ENTRY_PATH, resolveAssetRequestPath } from "./assets/resource"
-import {
-  authorize,
-  authorizeAssetView,
-  authorizeBrowserSession,
-  checkPasswordAttempt,
-} from "./auth/authorize"
-import {
-  assetPreviewCookieOptions,
-  createAssetPreviewToken,
-  createSessionToken,
-  sessionCookieOptions,
-} from "./auth/session"
+import { authorize, authorizeBrowserSession, checkPasswordAttempt } from "./auth/authorize"
+import { createSessionToken, sessionCookieOptions } from "./auth/session"
 import { createServiceTokenMaterial } from "./auth/service-token"
 import { AssetBoxCoordinator } from "./coordinator"
 import {
   createTag,
   deleteTag,
-  findAssetFile,
   getLibrary,
   replaceAssetTags,
-  requireAsset,
   setAssetLifecycle,
   updateTag,
 } from "./data/repository"
@@ -54,7 +41,7 @@ import {
   listServiceTokens,
   revokeServiceToken,
 } from "./data/service-token-repository"
-import { InternalFailureError, InvalidInputError, StorageFailureError } from "./errors"
+import { InternalFailureError, InvalidInputError } from "./errors"
 import {
   type AppContext,
   commonErrorResponses,
@@ -341,98 +328,7 @@ app.delete("/api/assets/:id", async (c) => {
   return c.body(null, 204)
 })
 
-app.get("/view/:id", async (c) => {
-  const auth = await authorize(c)
-  if (auth instanceof Error) return respondError(c, auth)
-  const id = AssetIdSchema.safeParse(c.req.param("id"))
-  if (!id.success) {
-    return respondError(c, new InvalidInputError({ reason: "Asset id is invalid" }))
-  }
-  const metadata = await requireAsset({ db: c.env.ASSET_BOX_DB, id: id.data })
-  if (metadata instanceof Error) return respondError(c, metadata)
-  const file = await findAssetFile({
-    db: c.env.ASSET_BOX_DB,
-    assetId: id.data,
-    path: ASSET_ENTRY_PATH,
-  })
-  if (file instanceof Error) return respondError(c, file)
-  if (file.tag === "missing") {
-    return c.json(
-      { error: { code: "ASSET_NOT_FOUND" as const, message: "Asset file not found" } },
-      404,
-    )
-  }
-  if (file.value.object_key !== `assets/${id.data}.html`) {
-    if (auth.tag === "browser-session") {
-      const previewToken = await createAssetPreviewToken({
-        assetId: id.data,
-        secret: c.env.SESSION_SECRET,
-        now: new Date(),
-      })
-      if (previewToken instanceof Error) return respondError(c, previewToken)
-      setCookie(c, "asset_box_preview", previewToken, assetPreviewCookieOptions(id.data))
-    }
-    return c.redirect(`/view/${id.data}/`, 308)
-  }
-  const object = await c.env.ASSET_BOX_BUCKET.get(file.value.object_key).catch(
-    (cause) => new StorageFailureError({ operation: "asset read", cause }),
-  )
-  if (object instanceof Error) return respondError(c, object)
-  if (object === null) {
-    return respondError(c, new StorageFailureError({ operation: "asset read" }))
-  }
-  return assetHtmlResponse({
-    body: object.body,
-    cacheControl: "private, max-age=3600",
-    disposition: "inline",
-    filename: `${id.data}.html`,
-  })
-})
-
-app.get("/view/:id/*", async (c) => {
-  const id = AssetIdSchema.safeParse(c.req.param("id"))
-  if (!id.success) {
-    return respondError(c, new InvalidInputError({ reason: "Asset id is invalid" }))
-  }
-  const auth = await authorizeAssetView(c, id.data)
-  if (auth instanceof Error) return respondError(c, auth)
-  const requestedPath = c.req.param("*")
-  const path = resolveAssetRequestPath(requestedPath)
-  if (path instanceof Error) return respondError(c, path)
-  const metadata = await requireAsset({ db: c.env.ASSET_BOX_DB, id: id.data })
-  if (metadata instanceof Error) return respondError(c, metadata)
-  const file = await findAssetFile({ db: c.env.ASSET_BOX_DB, assetId: id.data, path })
-  if (file instanceof Error) return respondError(c, file)
-  if (file.tag === "missing") {
-    return c.json(
-      { error: { code: "ASSET_NOT_FOUND" as const, message: "Asset file not found" } },
-      404,
-    )
-  }
-  const object = await c.env.ASSET_BOX_BUCKET.get(file.value.object_key).catch(
-    (cause) => new StorageFailureError({ operation: "asset file read", cause }),
-  )
-  if (object instanceof Error) return respondError(c, object)
-  if (object === null) {
-    return respondError(c, new StorageFailureError({ operation: "asset file read" }))
-  }
-  const response = assetHtmlResponse({
-    body: object.body,
-    cacheControl: "private, max-age=3600",
-    disposition: "inline",
-    filename: path.split("/").at(-1) ?? ASSET_ENTRY_PATH,
-  })
-  if (requestedPath !== "" || auth.tag !== "browser-session") return response
-
-  const previewToken = await createAssetPreviewToken({
-    assetId: id.data,
-    secret: c.env.SESSION_SECRET,
-    now: new Date(),
-  })
-  if (previewToken instanceof Error) return respondError(c, previewToken)
-  setCookie(c, "asset_box_preview", previewToken, assetPreviewCookieOptions(id.data))
-  return c.newResponse(response.body, response)
-})
+registerAssetViewRoutes(app)
 
 app.get("/api/events", async (c) => {
   const auth = await authorize(c)

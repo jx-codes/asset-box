@@ -6,6 +6,10 @@ import { clearAssetSelection } from "../state/library.actions"
 import { openAssetWorkRequest } from "../state/work-request.actions"
 import { AssetActions } from "./asset-actions"
 
+export function assetViewHref(assetId: string) {
+  return `/view/${assetId}?preview=path-capability-v1`
+}
+
 export function AssetPreview({ asset, tags }: { asset: Asset | undefined; tags: Tag[] }) {
   if (!asset) {
     return (
@@ -47,7 +51,7 @@ export function AssetPreview({ asset, tags }: { asset: Asset | undefined; tags: 
         </Button>
         <AssetActions asset={asset} tags={tags} />
         <Button variant="outline" size="sm" asChild>
-          <a href={`/view/${asset.id}/`} target="_blank" rel="noreferrer">
+          <a href={assetViewHref(asset.id)} target="_blank" rel="noreferrer">
             <ExternalLink className="size-3.5" />
             <span className="hidden sm:inline">Open</span>
           </a>
@@ -57,7 +61,7 @@ export function AssetPreview({ asset, tags }: { asset: Asset | undefined; tags: 
       <div className="flex min-h-0 flex-1 flex-col p-2 md:p-3">
         <iframe
           className="min-h-0 flex-1 bg-white shadow-sm ring-1 ring-black/10"
-          src={`/view/${asset.id}/`}
+          src={assetViewHref(asset.id)}
           title={asset.title}
           sandbox="allow-scripts"
         />
